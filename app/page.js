@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   MapPin, Play, Pause, Square, ChevronLeft, Share2, Copy, MessageCircle,
   Route as RouteIcon, Compass, Search, Heart, Eye, Clock, Gauge, Plus, Sparkles,
-  Bookmark, Camera, Check, QrCode, X, Loader2, Trash2
+  Bookmark, Camera, Check, QrCode, X, Loader2, Trash2, Star, AlertTriangle,
+  TrendingUp, Flame, WifiOff, Send, Zap, Info, CloudRain, Construction
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { totalDistance, haversine, formatDuration, formatDistance } from '@/lib/geo';
+import { cacheRoute, listCached, getCachedRoute } from '@/lib/offlineCache';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -23,6 +25,14 @@ const TAGS = [
   'Truck Friendly', 'Monsoon Safe', 'Avoid Traffic', 'Village Route',
 ];
 const ROUTE_TYPES = ['Commute', 'Road Trip', 'Bike Ride', 'Walk', 'Village', 'Delivery'];
+
+const CONDITION_TYPES = [
+  { key: 'pothole', label: 'Pothole', icon: AlertTriangle, color: 'text-amber-600 bg-amber-50 border-amber-200' },
+  { key: 'traffic', label: 'Traffic', icon: Zap, color: 'text-red-600 bg-red-50 border-red-200' },
+  { key: 'roadblock', label: 'Roadblock', icon: Construction, color: 'text-orange-600 bg-orange-50 border-orange-200' },
+  { key: 'weather', label: 'Weather', icon: CloudRain, color: 'text-blue-600 bg-blue-50 border-blue-200' },
+  { key: 'info', label: 'Info', icon: Info, color: 'text-neutral-600 bg-neutral-50 border-neutral-200' },
+];
 
 function useLocalUser() {
   const [user, setUser] = useState(null);
@@ -39,11 +49,31 @@ function useLocalUser() {
     }
     setUser({ uid, name });
   }, []);
-  const updateName = (n) => {
-    localStorage.setItem('raasta_name', n);
-    setUser((u) => ({ ...u, name: n }));
-  };
-  return { user, updateName };
+  return { user };
+}
+
+function useServiceWorker() {
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  }, []);
+}
+
+function useOnlineStatus() {
+  const [online, setOnline] = useState(true);
+  useEffect(() => {
+    setOnline(navigator.onLine);
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+  return online;
 }
 
 // ============= SPLASH =============
@@ -92,10 +122,18 @@ function Splash({ onDone }) {
 // ============= HOME =============
 function Home({ onNav, user }) {
   const [myRoutes, setMyRoutes] = useState([]);
+  const online = useOnlineStatus();
+
   useEffect(() => {
     if (!user) return;
-    fetch(`/api/routes?user_id=${user.uid}`).then(r => r.json()).then(setMyRoutes).catch(() => {});
-  }, [user]);
+    if (!online) {
+      setMyRoutes(listCached());
+      return;
+    }
+    fetch(`/api/routes?user_id=${user.uid}`).then(r => r.json()).then(setMyRoutes).catch(() => {
+      setMyRoutes(listCached());
+    });
+  }, [user, online]);
 
   return (
     <div className="min-h-screen bg-white pb-24">
@@ -109,6 +147,12 @@ function Home({ onNav, user }) {
             <RouteIcon className="h-5 w-5" />
           </div>
         </div>
+        {!online && (
+          <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 px-4 py-2.5 flex items-center gap-2">
+            <WifiOff className="h-4 w-4 text-amber-700" />
+            <p className="text-xs text-amber-800">You’re offline. Showing cached routes.</p>
+          </div>
+        )}
       </div>
 
       <div className="px-6">
@@ -190,6 +234,11 @@ function RouteCard({ route, onOpen }) {
             <MapPin className="h-8 w-8" />
           </div>
         )}
+        {route.ai_summary?.vibe && (
+          <div className="absolute top-2 left-2 px-2.5 py-1 rounded-full bg-white/95 backdrop-blur text-[10px] font-medium flex items-center gap-1 shadow-sm">
+            <Sparkles className="h-3 w-3" /> {route.ai_summary.vibe}
+          </div>
+        )}
       </div>
       <div className="p-4">
         <div className="flex items-start justify-between gap-2">
@@ -207,6 +256,8 @@ function RouteCard({ route, onOpen }) {
           <span className="flex items-center gap-1"><RouteIcon className="h-3.5 w-3.5" /> {formatDistance(route.distance_km || 0)}</span>
           <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {formatDuration(route.duration_sec || 0)}</span>
           <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" /> {route.views || 0}</span>
+          {route.likes > 0 && <span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5" /> {route.likes}</span>}
+          {route.rating_count > 0 && <span className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" /> {route.rating_avg?.toFixed(1)}</span>}
         </div>
         {route.tags?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-3">
@@ -223,7 +274,7 @@ function RouteCard({ route, onOpen }) {
 // ============= RECORD =============
 function Record({ onBack, onDone }) {
   const [points, setPoints] = useState([]);
-  const [status, setStatus] = useState('idle'); // idle | recording | paused
+  const [status, setStatus] = useState('idle');
   const [elapsed, setElapsed] = useState(0);
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [maxSpeed, setMaxSpeed] = useState(0);
@@ -246,6 +297,7 @@ function Record({ onBack, onDone }) {
       setError('Geolocation not supported on this device.');
       return;
     }
+    setError(null);
     setStatus('recording');
     startTimeRef.current = Date.now() - elapsed * 1000;
     timerRef.current = setInterval(() => {
@@ -266,11 +318,10 @@ function Record({ onBack, onDone }) {
           if (prev.length === 0) return [p];
           const last = prev[prev.length - 1];
           const d = haversine(last, p);
-          // filter jitter: only add if moved > 3m OR first update
           if (d * 1000 < 3 && pos.coords.accuracy > 20) return prev;
           return [...prev, p];
         });
-        const spd = (pos.coords.speed ?? 0) * 3.6; // m/s -> km/h
+        const spd = (pos.coords.speed ?? 0) * 3.6;
         setCurrentSpeed(spd);
         setMaxSpeed((m) => Math.max(m, spd));
       },
@@ -308,12 +359,35 @@ function Record({ onBack, onDone }) {
     });
   };
 
+  // Demo mode: simulate route recording (useful in iframe where geolocation blocked)
+  const simulateRoute = () => {
+    setStatus('recording');
+    const base = { lat: 19.076, lng: 72.877 };
+    const now = Date.now();
+    const pts = [];
+    for (let i = 0; i < 40; i++) {
+      pts.push({
+        lat: base.lat + i * 0.0008 + Math.sin(i * 0.4) * 0.0004,
+        lng: base.lng + i * 0.0011 + Math.cos(i * 0.4) * 0.0004,
+        timestamp: now + i * 10000,
+        speed: 8 + Math.random() * 4,
+        altitude: null,
+        accuracy: 5,
+      });
+    }
+    setPoints(pts);
+    setElapsed(400);
+    setCurrentSpeed(35);
+    setMaxSpeed(52);
+    setTimeout(() => setStatus('paused'), 400);
+  };
+
   const last = points[points.length - 1];
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <div className="absolute top-6 left-6 right-6 z-[500] flex items-center justify-between">
-        <button onClick={onBack} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center backdrop-blur">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center">
           <ChevronLeft className="h-5 w-5" />
         </button>
         <div className="px-4 py-2 rounded-full bg-white shadow-lg text-xs font-medium flex items-center gap-2">
@@ -325,12 +399,19 @@ function Record({ onBack, onDone }) {
 
       <div className="flex-1 relative min-h-[55vh]">
         {points.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-50">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-50 px-6">
             <div className="h-16 w-16 rounded-full bg-neutral-900 flex items-center justify-center mb-4">
               <MapPin className="h-8 w-8 text-white" />
             </div>
-            <p className="text-sm text-neutral-500">Press start to begin tracking</p>
-            {error && <p className="text-xs text-red-500 mt-2 px-4 text-center">{error}</p>}
+            <p className="text-sm text-neutral-500 text-center">Press start to begin tracking your route</p>
+            {error && (
+              <>
+                <p className="text-xs text-red-500 mt-3 px-4 text-center">{error}</p>
+                <button onClick={simulateRoute} className="mt-3 text-xs px-4 py-2 rounded-full bg-neutral-100 border border-neutral-200">
+                  Try demo route instead
+                </button>
+              </>
+            )}
           </div>
         ) : (
           <MapView points={points} follow={status === 'recording'} center={last ? [last.lat, last.lng] : null} zoom={17} />
@@ -346,13 +427,18 @@ function Record({ onBack, onDone }) {
           </div>
 
           {status === 'idle' && (
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={startRecording}
-              className="w-full h-16 rounded-full bg-neutral-900 text-white text-base font-semibold flex items-center justify-center gap-2 shadow-lg"
-            >
-              <Play className="h-5 w-5" fill="white" /> Start Recording
-            </motion.button>
+            <div className="space-y-2">
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={startRecording}
+                className="w-full h-16 rounded-full bg-neutral-900 text-white text-base font-semibold flex items-center justify-center gap-2 shadow-lg"
+              >
+                <Play className="h-5 w-5" fill="white" /> Start Recording
+              </motion.button>
+              <button onClick={simulateRoute} className="w-full text-xs text-neutral-500 py-2">
+                Demo mode (simulate a route)
+              </button>
+            </div>
           )}
 
           {status === 'recording' && (
@@ -442,7 +528,10 @@ function Save({ data, user, onBack, onSaved }) {
         }),
       });
       const created = await res.json();
+      cacheRoute(created);
       toast.success('Route saved!');
+      // fire-and-forget AI summary
+      fetch(`/api/routes/${created.id}/summarize`, { method: 'POST' }).catch(() => {});
       onSaved(created);
     } catch (e) {
       toast.error('Failed to save. Try again.');
@@ -567,16 +656,294 @@ function MiniStat({ icon, label, value }) {
   );
 }
 
+// ============= AI SUMMARY CARD =============
+function AISummaryCard({ route, onRefresh, loading }) {
+  const ai = route.ai_summary;
+  return (
+    <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-white to-blue-50 border border-violet-100 p-5 mt-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <div className="h-8 w-8 rounded-xl bg-neutral-900 flex items-center justify-center">
+            <Sparkles className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-neutral-900">AI Summary</p>
+            {ai?.vibe && <p className="text-[10px] text-neutral-500 lowercase">{ai.vibe}</p>}
+          </div>
+        </div>
+        {onRefresh && (
+          <button onClick={onRefresh} disabled={loading} className="text-[10px] text-neutral-500 hover:text-neutral-900">
+            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Regenerate'}
+          </button>
+        )}
+      </div>
+      {ai ? (
+        <>
+          <p className="text-sm text-neutral-800 leading-relaxed">{ai.summary}</p>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="rounded-2xl bg-white border border-neutral-100 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Difficulty</p>
+              <div className="flex items-center gap-1 mt-1">
+                {[1,2,3,4,5].map(i => (
+                  <div key={i} className={`h-1.5 flex-1 rounded-full ${i <= ai.difficulty ? 'bg-neutral-900' : 'bg-neutral-200'}`} />
+                ))}
+              </div>
+              <p className="text-xs text-neutral-700 mt-1.5 font-medium">{['','Very easy','Easy','Moderate','Challenging','Demanding'][ai.difficulty]}</p>
+            </div>
+            <div className="rounded-2xl bg-white border border-neutral-100 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Fuel estimate</p>
+              <p className="text-xs text-neutral-700 mt-1.5 leading-snug">{ai.fuel_note}</p>
+            </div>
+          </div>
+        </>
+      ) : loading ? (
+        <div className="space-y-2">
+          <div className="h-3 rounded bg-neutral-200 animate-pulse" />
+          <div className="h-3 rounded bg-neutral-200 animate-pulse w-4/5" />
+          <div className="h-3 rounded bg-neutral-200 animate-pulse w-3/5" />
+        </div>
+      ) : (
+        <button onClick={onRefresh} className="text-xs text-neutral-600 flex items-center gap-1">
+          <Sparkles className="h-3 w-3" /> Generate AI summary
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============= COMMENTS =============
+function CommentsSection({ routeId, user }) {
+  const [comments, setComments] = useState([]);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const load = () => {
+    fetch(`/api/routes/${routeId}/comments`).then(r => r.json()).then(setComments).catch(() => {});
+  };
+
+  useEffect(() => { load(); }, [routeId]);
+
+  const send = async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    try {
+      await fetch(`/api/routes/${routeId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user?.uid, author: user?.name, text: text.trim() }),
+      });
+      setText('');
+      load();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="mt-6">
+      <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-3">Comments · {comments.length}</p>
+      <div className="space-y-3">
+        {comments.map(c => (
+          <div key={c.id} className="rounded-2xl bg-neutral-50 border border-neutral-100 p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold">{c.author}</p>
+              <p className="text-[10px] text-neutral-400">{new Date(c.created_at).toLocaleDateString()}</p>
+            </div>
+            <p className="text-sm text-neutral-800 mt-1">{c.text}</p>
+          </div>
+        ))}
+        {comments.length === 0 && (
+          <p className="text-xs text-neutral-400 text-center py-4">No comments yet. Be the first to share!</p>
+        )}
+      </div>
+      <div className="flex items-center gap-2 mt-3">
+        <Input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && send()}
+          placeholder="Add a comment..."
+          className="h-11 rounded-2xl border-neutral-200 bg-neutral-50"
+        />
+        <button onClick={send} disabled={sending || !text.trim()} className="h-11 w-11 rounded-full bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============= CONDITIONS =============
+function ConditionsSection({ routeId, user }) {
+  const [items, setItems] = useState([]);
+  const [type, setType] = useState('pothole');
+  const [text, setText] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const load = () => {
+    fetch(`/api/routes/${routeId}/conditions`).then(r => r.json()).then(setItems).catch(() => {});
+  };
+  useEffect(() => { load(); }, [routeId]);
+
+  const submit = async () => {
+    if (!text.trim()) return;
+    setAdding(true);
+    try {
+      await fetch(`/api/routes/${routeId}/conditions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user?.uid, author: user?.name, type, text: text.trim() }),
+      });
+      setText('');
+      load();
+      toast.success('Alert posted');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div className="mt-6">
+      <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-3">Road conditions · {items.length}</p>
+      <div className="space-y-2">
+        {items.map(i => {
+          const cfg = CONDITION_TYPES.find(c => c.key === i.type) || CONDITION_TYPES[4];
+          const Icon = cfg.icon;
+          return (
+            <div key={i.id} className={`rounded-2xl border p-3 flex items-start gap-3 ${cfg.color}`}>
+              <Icon className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold capitalize">{cfg.label} • {i.author}</p>
+                  <p className="text-[10px] opacity-70">{new Date(i.created_at).toLocaleDateString()}</p>
+                </div>
+                <p className="text-sm mt-0.5">{i.text}</p>
+              </div>
+            </div>
+          );
+        })}
+        {items.length === 0 && (
+          <p className="text-xs text-neutral-400 text-center py-4">No road alerts yet.</p>
+        )}
+      </div>
+      <div className="mt-3 rounded-2xl border border-neutral-100 p-3">
+        <div className="flex gap-1.5 mb-2 overflow-x-auto">
+          {CONDITION_TYPES.map(c => (
+            <button
+              key={c.key}
+              onClick={() => setType(c.key)}
+              className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-medium border ${type === c.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white border-neutral-200'}`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Post a road alert..."
+            className="h-10 rounded-xl border-neutral-200 bg-neutral-50 text-sm"
+          />
+          <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============= RATING =============
+function RatingRow({ routeId, user, current }) {
+  const [avg, setAvg] = useState(current?.rating_avg || 0);
+  const [count, setCount] = useState(current?.rating_count || 0);
+  const [my, setMy] = useState(0);
+  const [hover, setHover] = useState(0);
+
+  const rate = async (stars) => {
+    setMy(stars);
+    const res = await fetch(`/api/routes/${routeId}/rate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user?.uid, stars }),
+    });
+    const data = await res.json();
+    setAvg(data.rating_avg);
+    setCount(data.rating_count);
+    toast.success(`You rated ${stars} ★`);
+  };
+
+  return (
+    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 border border-neutral-100 p-4 mt-4">
+      <div>
+        <p className="text-xs text-neutral-500">Your rating</p>
+        <div className="flex items-center gap-0.5 mt-1">
+          {[1,2,3,4,5].map(i => (
+            <button
+              key={i}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(0)}
+              onClick={() => rate(i)}
+              className="p-0.5"
+            >
+              <Star className={`h-5 w-5 ${(hover || my) >= i ? 'fill-amber-400 text-amber-400' : 'text-neutral-300'}`} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="text-right">
+        <p className="text-xs text-neutral-500">Community</p>
+        <p className="text-lg font-semibold flex items-center gap-1 justify-end">
+          <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+          {avg > 0 ? avg.toFixed(1) : '–'}
+          <span className="text-xs text-neutral-500 font-normal">({count})</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ============= DETAIL =============
-function Detail({ routeId, onBack, onShare }) {
+function Detail({ routeId, onBack, onShare, user }) {
   const [route, setRoute] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [liked, setLiked] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
 
-  useEffect(() => {
+  const load = () => {
     fetch(`/api/routes/${routeId}`)
       .then((r) => r.json())
-      .then((r) => { setRoute(r); setLoading(false); });
-  }, [routeId]);
+      .then((r) => {
+        setRoute(r);
+        cacheRoute(r);
+        setLoading(false);
+        if (!r.ai_summary) genSummary(r.id);
+      });
+  };
+
+  const genSummary = async (id) => {
+    setAiLoading(true);
+    try {
+      const res = await fetch(`/api/routes/${id}/summarize`, { method: 'POST' });
+      const ai = await res.json();
+      setRoute((r) => ({ ...r, ai_summary: ai }));
+    } catch {} finally {
+      setAiLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [routeId]);
+
+  const toggleLike = async () => {
+    setLiked(!liked);
+    const res = await fetch(`/api/routes/${routeId}/like`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unlike: liked }),
+    });
+    const updated = await res.json();
+    setRoute((r) => ({ ...r, likes: updated.likes }));
+  };
 
   if (loading) {
     return (
@@ -600,6 +967,11 @@ function Detail({ routeId, onBack, onShare }) {
       <div className="absolute top-6 left-6 z-[500]">
         <button onClick={onBack} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center">
           <ChevronLeft className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="absolute top-6 right-6 z-[500]">
+        <button onClick={toggleLike} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center">
+          <Heart className={`h-5 w-5 ${liked ? 'fill-red-500 text-red-500' : ''}`} />
         </button>
       </div>
 
@@ -628,6 +1000,10 @@ function Detail({ routeId, onBack, onShare }) {
             <MiniStat icon={<Eye className="h-4 w-4" />} label="Views" value={String(route.views || 0)} />
           </div>
 
+          <AISummaryCard route={route} onRefresh={() => genSummary(route.id)} loading={aiLoading} />
+
+          <RatingRow routeId={route.id} user={user} current={route} />
+
           {route.tags?.length > 0 && (
             <div className="mt-5">
               <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">Tags</p>
@@ -647,6 +1023,9 @@ function Detail({ routeId, onBack, onShare }) {
               </div>
             </div>
           )}
+
+          <ConditionsSection routeId={route.id} user={user} />
+          <CommentsSection routeId={route.id} user={user} />
         </div>
       </div>
 
@@ -664,16 +1043,17 @@ function Detail({ routeId, onBack, onShare }) {
   );
 }
 
-// ============= MY ROUTES / EXPLORE =============
+// ============= LIST =============
 function RouteList({ title, onBack, onOpen, user, mine }) {
   const [routes, setRoutes] = useState(null);
   const [q, setQ] = useState('');
+  const [sort, setSort] = useState('recent');
 
   useEffect(() => {
-    const url = mine ? `/api/routes?user_id=${user?.uid}` : '/api/routes';
+    const url = mine ? `/api/routes?user_id=${user?.uid}` : `/api/routes?sort=${sort}`;
     if (mine && !user) return;
-    fetch(url).then(r => r.json()).then(setRoutes);
-  }, [user, mine]);
+    fetch(url).then(r => r.json()).then(setRoutes).catch(() => setRoutes([]));
+  }, [user, mine, sort]);
 
   const filtered = (routes || []).filter(r =>
     !q || r.name.toLowerCase().includes(q.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(q.toLowerCase()))
@@ -697,6 +1077,25 @@ function RouteList({ title, onBack, onOpen, user, mine }) {
             className="pl-11 h-12 rounded-2xl border-neutral-200 bg-neutral-50"
           />
         </div>
+        {!mine && (
+          <div className="flex gap-2 mt-3">
+            {[
+              { k: 'recent', l: 'Recent', I: Clock },
+              { k: 'trending', l: 'Trending', I: TrendingUp },
+              { k: 'popular', l: 'Popular', I: Flame },
+            ].map(t => (
+              <button
+                key={t.k}
+                onClick={() => setSort(t.k)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1 ${
+                  sort === t.k ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'
+                }`}
+              >
+                <t.I className="h-3 w-3" /> {t.l}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="px-6 mt-5 space-y-3">
         {routes === null && (
@@ -805,6 +1204,7 @@ function App() {
   const [recordedData, setRecordedData] = useState(null);
   const [shareRoute, setShareRoute] = useState(null);
   const { user } = useLocalUser();
+  useServiceWorker();
 
   const goto = (s, id = null) => {
     setScreen(s);
@@ -841,6 +1241,7 @@ function App() {
       {screen === 'detail' && detailId && (
         <Detail
           routeId={detailId}
+          user={user}
           onBack={() => setScreen('home')}
           onShare={(r) => setShareRoute(r)}
         />
