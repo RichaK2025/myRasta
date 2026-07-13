@@ -76,6 +76,29 @@ export async function GET(request, { params }) {
       return NextResponse.json(docs.map(stripId));
     }
 
+    // GET /api/routes/:id/notes  -> map-point community notes
+    if (segments[0] === 'routes' && segments[1] && segments[2] === 'notes') {
+      const docs = await db
+        .collection('route_notes')
+        .find({ route_id: segments[1] })
+        .sort({ upvotes: -1, created_at: -1 })
+        .toArray();
+      return NextResponse.json(docs.map(stripId));
+    }
+
+    // GET /api/routes/:id/verifications
+    if (segments[0] === 'routes' && segments[1] && segments[2] === 'verifications') {
+      const docs = await db
+        .collection('verifications')
+        .find({ route_id: segments[1] })
+        .toArray();
+      return NextResponse.json({
+        count: docs.length,
+        users: docs.map(d => ({ user_id: d.user_id, author: d.author, created_at: d.created_at })),
+      });
+    }
+
+
     // GET /api/routes/:id
     if (segments[0] === 'routes' && segments[1]) {
       const doc = await db.collection('routes').findOne({ id: segments[1] });
@@ -126,6 +149,7 @@ export async function POST(request, { params }) {
         likes: 0,
         rating_avg: 0,
         rating_count: 0,
+        verified_count: 0,
         ai_summary: null,
         created_at: new Date().toISOString(),
       };
@@ -208,12 +232,95 @@ export async function POST(request, { params }) {
     if (segments[0] === 'routes' && segments[1] && segments[2] === 'summarize') {
       const doc = await db.collection('routes').findOne({ id: segments[1] });
       if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-      const summary = await summarizeRoute(doc);
+      const notes = await db.collection('route_notes').find({ route_id: segments[1] }).limit(20).toArray();
+      const summary = await summarizeRoute(doc, notes);
       await db.collection('routes').updateOne(
         { id: segments[1] },
         { $set: { ai_summary: summary } }
       );
       return NextResponse.json(summary);
+    }
+
+    // POST /api/routes/:id/notes  -> add community note (map-point)
+    if (segments[0] === 'routes' && segments[1] && segments[2] === 'notes') {
+      const body = await request.json();
+      const note = {
+        id: uuidv4(),
+        route_id: segments[1],
+        user_id: body.user_id || 'anon',
+        author: body.author || 'Anonymous',
+        category: body.category || 'info',
+        text: (body.text || '').trim().slice(0, 300),
+        lat: body.lat ?? null,
+        lng: body.lng ?? null,
+        upvotes: 0,
+        downvotes: 0,
+        created_at: new Date().toISOString(),
+      };
+      if (!note.text) return NextResponse.json({ error: 'Empty note' }, { status: 400 });
+      // If no lat/lng given, use route midpoint
+      if (note.lat == null || note.lng == null) {
+        const route = await db.collection('routes').findOne({ id: segments[1] });
+        const pts = route?.points || [];
+        if (pts.length > 0) {
+          const mid = pts[Math.floor(pts.length / 2)];
+          note.lat = mid.lat;
+          note.lng = mid.lng;
+        }
+      }
+      await db.collection('route_notes').insertOne(note);
+      return NextResponse.json(stripId(note));
+    }
+
+    // POST /api/routes/:id/verify  -> mark route verified by this user
+    if (segments[0] === 'routes' && segments[1] && segments[2] === 'verify') {
+      const body = await request.json().catch(() => ({}));
+      const user_id = body.user_id || 'anon';
+      const existing = await db.collection('verifications').findOne({ route_id: segments[1], user_id });
+      if (existing && body.unverify) {
+        await db.collection('verifications').deleteOne({ route_id: segments[1], user_id });
+      } else if (!existing && !body.unverify) {
+        await db.collection('verifications').insertOne({
+          id: uuidv4(),
+          route_id: segments[1],
+          user_id,
+          author: body.author || 'Anonymous',
+          created_at: new Date().toISOString(),
+        });
+      }
+      const all = await db.collection('verifications').find({ route_id: segments[1] }).toArray();
+      await db.collection('routes').updateOne(
+        { id: segments[1] },
+        { $set: { verified_count: all.length } }
+      );
+      return NextResponse.json({
+        verified_count: all.length,
+        verified_by_me: !body.unverify && (!!existing || true),
+      });
+    }
+
+    // POST /api/notes/:noteId/vote  -> upvote/downvote note
+    if (segments[0] === 'notes' && segments[1] && segments[2] === 'vote') {
+      const body = await request.json();
+      const dir = body.direction === 'down' ? 'downvotes' : 'upvotes';
+      await db.collection('route_notes').updateOne(
+        { id: segments[1] },
+        { $inc: { [dir]: 1 } }
+      );
+      const doc = await db.collection('route_notes').findOne({ id: segments[1] });
+      return NextResponse.json(stripId(doc));
+    }
+
+    // POST /api/conditions/:condId/vote  -> upvote/downvote condition
+    if (segments[0] === 'conditions' && segments[1] && segments[2] === 'vote') {
+      const body = await request.json();
+      const dir = body.direction === 'down' ? 'downvotes' : 'upvotes';
+      await db.collection('conditions').updateOne(
+        { id: segments[1] },
+        { $inc: { [dir]: 1 } }
+      );
+      const doc = await db.collection('conditions').findOne({ id: segments[1] });
+      return NextResponse.json(stripId(doc));
     }
 
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -233,6 +340,8 @@ export async function DELETE(request, { params }) {
       await db.collection('comments').deleteMany({ route_id: segments[1] });
       await db.collection('ratings').deleteMany({ route_id: segments[1] });
       await db.collection('conditions').deleteMany({ route_id: segments[1] });
+      await db.collection('route_notes').deleteMany({ route_id: segments[1] });
+      await db.collection('verifications').deleteMany({ route_id: segments[1] });
       return NextResponse.json({ ok: true });
     }
     return NextResponse.json({ error: 'Not found' }, { status: 404 });

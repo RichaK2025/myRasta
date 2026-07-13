@@ -6,8 +6,8 @@ import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import {
   MapPin, Clock, Gauge, Eye, Route as RouteIcon, Loader2, Sparkles, ChevronLeft, Share2,
-  Heart, MessageCircle, Navigation, Star, AlertTriangle, Zap, Construction, CloudRain, Info,
-  WifiOff, Send
+  Star, AlertTriangle, Zap, Construction, CloudRain, Info, Send, Navigation, MessageCircle,
+  ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield, Mountain, MapPinned, ThumbsUp, ThumbsDown, X
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,11 +20,25 @@ import { toast } from 'sonner';
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
 const CONDITION_TYPES = [
-  { key: 'pothole', label: 'Pothole', icon: AlertTriangle, color: 'text-amber-600 bg-amber-50 border-amber-200' },
-  { key: 'traffic', label: 'Traffic', icon: Zap, color: 'text-red-600 bg-red-50 border-red-200' },
-  { key: 'roadblock', label: 'Roadblock', icon: Construction, color: 'text-orange-600 bg-orange-50 border-orange-200' },
-  { key: 'weather', label: 'Weather', icon: CloudRain, color: 'text-blue-600 bg-blue-50 border-blue-200' },
-  { key: 'info', label: 'Info', icon: Info, color: 'text-neutral-600 bg-neutral-50 border-neutral-200' },
+  { key: 'pothole', label: 'Pothole', icon: AlertTriangle, color: 'text-amber-700 bg-amber-50 border-amber-200' },
+  { key: 'flooding', label: 'Flooding', icon: CloudRain, color: 'text-blue-700 bg-blue-50 border-blue-200' },
+  { key: 'traffic', label: 'Traffic', icon: Zap, color: 'text-red-700 bg-red-50 border-red-200' },
+  { key: 'roadblock', label: 'Roadblock', icon: Construction, color: 'text-orange-700 bg-orange-50 border-orange-200' },
+  { key: 'closure', label: 'Closure', icon: X, color: 'text-neutral-800 bg-neutral-100 border-neutral-200' },
+  { key: 'info', label: 'Info', icon: Info, color: 'text-neutral-700 bg-neutral-50 border-neutral-200' },
+];
+
+const NOTE_CATEGORIES = [
+  { key: 'tea', label: 'Tea/Chai', icon: Coffee, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-600' },
+  { key: 'food', label: 'Food', icon: Utensils, color: 'bg-orange-50 border-orange-200 text-orange-800', dot: 'bg-orange-500' },
+  { key: 'fuel', label: 'Fuel', icon: Fuel, color: 'bg-cyan-50 border-cyan-200 text-cyan-800', dot: 'bg-cyan-600' },
+  { key: 'washroom', label: 'Washroom', icon: Bath, color: 'bg-blue-50 border-blue-200 text-blue-800', dot: 'bg-blue-600' },
+  { key: 'police', label: 'Police', icon: Shield, color: 'bg-indigo-50 border-indigo-200 text-indigo-800', dot: 'bg-indigo-600' },
+  { key: 'danger', label: 'Danger', icon: AlertTriangle, color: 'bg-red-50 border-red-200 text-red-800', dot: 'bg-red-600' },
+  { key: 'safe', label: 'Safe', icon: ShieldCheck, color: 'bg-green-50 border-green-200 text-green-800', dot: 'bg-green-600' },
+  { key: 'scenic', label: 'Scenic', icon: Mountain, color: 'bg-violet-50 border-violet-200 text-violet-800', dot: 'bg-violet-600' },
+  { key: 'shortcut', label: 'Shortcut', icon: Zap, color: 'bg-pink-50 border-pink-200 text-pink-800', dot: 'bg-pink-600' },
+  { key: 'warning', label: 'Warning', icon: Info, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-700' },
 ];
 
 function useAnonUser() {
@@ -44,6 +58,7 @@ export default function SharePage() {
   const router = useRouter();
   const code = params.code;
   const [route, setRoute] = useState(null);
+  const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [following, setFollowing] = useState(false);
@@ -56,19 +71,18 @@ export default function SharePage() {
       .then((r) => {
         if (r.error) {
           const cached = getCachedRoute(code);
-          if (cached) { setRoute(cached); }
+          if (cached) setRoute(cached);
           else setNotFound(true);
         } else {
-          setRoute(r);
-          cacheRoute(r);
+          setRoute(r); cacheRoute(r);
           if (!r.ai_summary) genSummary(r.id);
+          fetch(`/api/routes/${r.id}/notes`).then(x => x.json()).then(setNotes).catch(() => {});
         }
         setLoading(false);
       })
       .catch(() => {
         const cached = getCachedRoute(code);
-        if (cached) setRoute(cached);
-        else setNotFound(true);
+        if (cached) setRoute(cached); else setNotFound(true);
         setLoading(false);
       });
   };
@@ -85,37 +99,28 @@ export default function SharePage() {
   useEffect(() => { load(); }, [code]);
 
   const shareUrl = typeof window !== 'undefined' ? window.location.href : '';
-
   const openInMaps = () => {
     if (!route?.start || !route?.end) return;
     const url = `https://www.google.com/maps/dir/?api=1&origin=${route.start.lat},${route.start.lng}&destination=${route.end.lat},${route.end.lng}&travelmode=driving`;
     window.open(url, '_blank');
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen bg-white flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-neutral-400" /></div>;
 
-  if (notFound) {
-    return (
-      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8">
-        <div className="h-16 w-16 rounded-2xl bg-neutral-100 flex items-center justify-center mb-4">
-          <MapPin className="h-8 w-8 text-neutral-400" />
-        </div>
-        <p className="text-lg font-semibold">Route not found</p>
-        <p className="text-sm text-neutral-500 mt-1">This link may be broken or expired.</p>
-        <Button onClick={() => router.push('/')} variant="ghost" className="mt-6">Go to Raasta</Button>
+  if (notFound) return (
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8">
+      <div className="h-16 w-16 rounded-2xl bg-neutral-100 flex items-center justify-center mb-4">
+        <MapPin className="h-8 w-8 text-neutral-400" />
       </div>
-    );
-  }
+      <p className="text-lg font-semibold">Route not found</p>
+      <p className="text-sm text-neutral-500 mt-1">This link may be broken or expired.</p>
+      <Button onClick={() => router.push('/')} variant="ghost" className="mt-6">Go to Raasta</Button>
+    </div>
+  );
 
-  if (following) {
-    return <FollowMode route={route} onExit={() => setFollowing(false)} />;
-  }
+  if (following) return <FollowMode route={route} onExit={() => setFollowing(false)} />;
+
+  const noteMarkers = notes.filter(n => n.lat != null && n.lng != null);
 
   return (
     <div className="max-w-md mx-auto bg-white min-h-screen pb-32">
@@ -130,15 +135,16 @@ export default function SharePage() {
       </div>
 
       <div className="h-[50vh] relative bg-neutral-100">
-        <MapView points={route.points} fit interactive={true} />
+        <MapView points={route.points} fit interactive noteMarkers={noteMarkers} />
+        {route.verified_count > 0 && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-full bg-neutral-900 text-white text-xs font-medium flex items-center gap-1.5 shadow-xl">
+            <ShieldCheck className="h-3.5 w-3.5" /> Verified by {route.verified_count} local{route.verified_count > 1 ? 's' : ''}
+          </div>
+        )}
       </div>
 
-      <motion.div
-        initial={{ y: 40, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.4 }}
-        className="px-6 -mt-8 relative bg-white rounded-t-3xl shadow-2xl"
-      >
+      <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.4 }}
+        className="px-6 -mt-8 relative bg-white rounded-t-3xl shadow-2xl">
         <div className="h-1 w-12 rounded-full bg-neutral-200 mx-auto mt-3" />
         <div className="pt-4">
           <div className="flex items-start justify-between gap-3">
@@ -146,14 +152,10 @@ export default function SharePage() {
               <h1 className="text-2xl font-semibold tracking-tight">{route.name}</h1>
               <p className="text-sm text-neutral-500 mt-1">Shared by {route.creator_name}</p>
             </div>
-            {route.route_type && (
-              <Badge variant="secondary" className="rounded-full">{route.route_type}</Badge>
-            )}
+            {route.route_type && <Badge variant="secondary" className="rounded-full">{route.route_type}</Badge>}
           </div>
 
-          {route.description && (
-            <p className="text-sm text-neutral-700 mt-4 leading-relaxed">{route.description}</p>
-          )}
+          {route.description && <p className="text-sm text-neutral-700 mt-4 leading-relaxed">{route.description}</p>}
 
           <div className="grid grid-cols-4 gap-3 mt-6 py-4 border-y border-neutral-100">
             <Stat icon={<RouteIcon className="h-4 w-4" />} label="Distance" value={formatDistance(route.distance_km || 0)} />
@@ -162,6 +164,8 @@ export default function SharePage() {
             <Stat icon={<Eye className="h-4 w-4" />} label="Views" value={String(route.views || 0)} />
           </div>
 
+          <VerifyBox route={route} user={user} onChange={(c) => setRoute(r => ({ ...r, verified_count: c }))} />
+
           {(route.ai_summary || aiLoading) && (
             <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-white to-blue-50 border border-violet-100 p-5 mt-5">
               <div className="flex items-center gap-2 mb-3">
@@ -169,7 +173,7 @@ export default function SharePage() {
                   <Sparkles className="h-4 w-4 text-white" />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-neutral-900">AI Summary</p>
+                  <p className="text-xs font-semibold text-neutral-900">Local's Take</p>
                   {route.ai_summary?.vibe && <p className="text-[10px] text-neutral-500 lowercase">{route.ai_summary.vibe}</p>}
                 </div>
               </div>
@@ -181,6 +185,9 @@ export default function SharePage() {
               ) : (
                 <>
                   <p className="text-sm text-neutral-800 leading-relaxed">{route.ai_summary.summary}</p>
+                  {route.ai_summary.best_for && (
+                    <p className="text-xs text-neutral-600 mt-2 italic">Best for: {route.ai_summary.best_for}</p>
+                  )}
                   <div className="grid grid-cols-2 gap-3 mt-4">
                     <div className="rounded-2xl bg-white border border-neutral-100 p-3">
                       <p className="text-[10px] uppercase tracking-wider text-neutral-500">Difficulty</p>
@@ -229,8 +236,8 @@ export default function SharePage() {
             </div>
           )}
 
+          <CommunityNotesInline routeId={route.id} user={user} notes={notes} reload={() => fetch(`/api/routes/${route.id}/notes`).then(r => r.json()).then(setNotes)} />
           <ConditionsInline routeId={route.id} user={user} />
-          <CommentsInline routeId={route.id} user={user} />
 
           <div className="mt-6 rounded-2xl bg-neutral-50 border border-neutral-100 p-4 flex items-center gap-4">
             <div className="bg-white p-2 rounded-xl border border-neutral-100">
@@ -241,22 +248,22 @@ export default function SharePage() {
               <p className="text-sm font-medium truncate mt-0.5">{shareUrl}</p>
             </div>
           </div>
+
+          <div className="mt-4 rounded-2xl bg-gradient-to-br from-neutral-900 to-neutral-700 text-white p-4">
+            <p className="text-[11px] text-white/60 uppercase tracking-widest">Raasta</p>
+            <p className="text-sm font-semibold mt-1">Navigate Like A Local.</p>
+            <p className="text-xs text-white/70 mt-1">Google Maps gives directions. Raasta gives recommendations.</p>
+          </div>
         </div>
       </motion.div>
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-white/80">
         <div className="max-w-md mx-auto flex gap-3">
-          <Button
-            onClick={openInMaps}
-            variant="outline"
-            className="h-14 rounded-full border-neutral-200 flex-1"
-          >
+          <Button onClick={openInMaps} variant="outline" className="h-14 rounded-full border-neutral-200 flex-1">
             <Navigation className="h-4 w-4 mr-2" /> In Maps
           </Button>
-          <Button
-            onClick={() => setFollowing(true)}
-            className="h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white text-base font-semibold flex-[2]"
-          >
+          <Button onClick={() => setFollowing(true)}
+            className="h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white text-base font-semibold flex-[2]">
             <Sparkles className="h-4 w-4 mr-2" /> Open & Follow Route
           </Button>
         </div>
@@ -275,47 +282,135 @@ function Stat({ icon, label, value }) {
   );
 }
 
-function CommentsInline({ routeId, user }) {
-  const [items, setItems] = useState([]);
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const load = () => fetch(`/api/routes/${routeId}/comments`).then(r => r.json()).then(setItems).catch(() => {});
-  useEffect(() => { load(); }, [routeId]);
-  const send = async () => {
-    if (!text.trim()) return;
-    setSending(true);
+function VerifyBox({ route, user, onChange }) {
+  const [count, setCount] = useState(route.verified_count || 0);
+  const [byMe, setByMe] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/routes/${route.id}/verifications`).then(r => r.json()).then((d) => {
+      setCount(d.count || 0);
+      setByMe(!!d.users?.find(u => u.user_id === user?.uid));
+    });
+  }, [route.id, user?.uid]);
+
+  const toggle = async () => {
+    if (!user) return; setBusy(true);
     try {
-      await fetch(`/api/routes/${routeId}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.uid, author: user?.name, text: text.trim() }),
+      const res = await fetch(`/api/routes/${route.id}/verify`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid, author: user.name, unverify: byMe }),
       });
-      setText(''); load();
-    } finally { setSending(false); }
+      const data = await res.json();
+      setCount(data.verified_count); setByMe(!byMe); onChange?.(data.verified_count);
+      toast.success(byMe ? 'Verification removed' : 'You verified this route ✓');
+    } finally { setBusy(false); }
   };
+
+  return (
+    <button onClick={toggle} disabled={busy}
+      className={`w-full rounded-2xl border p-4 flex items-center justify-between transition mt-4 ${byMe ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-neutral-50 border-neutral-100'}`}>
+      <div className="flex items-center gap-3">
+        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${byMe ? 'bg-white/10' : 'bg-neutral-900 text-white'}`}>
+          <ShieldCheck className="h-4 w-4" />
+        </div>
+        <div className="text-left">
+          <p className="text-sm font-semibold">{count > 0 ? `Verified by ${count} local${count > 1 ? 's' : ''}` : 'Not verified yet'}</p>
+          <p className={`text-[11px] ${byMe ? 'text-white/70' : 'text-neutral-500'}`}>{byMe ? 'Tap to remove your verification' : 'Confirm this route is accurate'}</p>
+        </div>
+      </div>
+      <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${byMe ? 'bg-white text-neutral-900' : 'bg-neutral-900 text-white'}`}>
+        {byMe ? 'Verified ✓' : 'Verify'}
+      </div>
+    </button>
+  );
+}
+
+function CommunityNotesInline({ routeId, user, notes, reload }) {
+  const [text, setText] = useState('');
+  const [category, setCategory] = useState('tea');
+  const [adding, setAdding] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  const submit = async () => {
+    if (!text.trim()) return;
+    setAdding(true);
+    try {
+      await fetch(`/api/routes/${routeId}/notes`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user?.uid, author: user?.name, category, text: text.trim() }),
+      });
+      setText(''); setShowForm(false); reload();
+      toast.success('Local knowledge added 🙏');
+    } finally { setAdding(false); }
+  };
+
+  const vote = async (id, dir) => {
+    await fetch(`/api/notes/${id}/vote`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction: dir }),
+    });
+    reload();
+  };
+
   return (
     <div className="mt-6">
-      <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-3">Comments · {items.length}</p>
-      <div className="space-y-3">
-        {items.map(c => (
-          <div key={c.id} className="rounded-2xl bg-neutral-50 border border-neutral-100 p-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold">{c.author}</p>
-              <p className="text-[10px] text-neutral-400">{new Date(c.created_at).toLocaleDateString()}</p>
-            </div>
-            <p className="text-sm text-neutral-800 mt-1">{c.text}</p>
-          </div>
-        ))}
-        {items.length === 0 && (
-          <p className="text-xs text-neutral-400 text-center py-4">No comments yet. Be the first!</p>
-        )}
-      </div>
-      <div className="flex items-center gap-2 mt-3">
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment..."
-          className="h-11 rounded-2xl border-neutral-200 bg-neutral-50" onKeyDown={(e) => e.key === 'Enter' && send()} />
-        <button onClick={send} disabled={sending || !text.trim()} className="h-11 w-11 rounded-full bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
-          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Local knowledge · {notes.length}</p>
+        <button onClick={() => setShowForm(!showForm)} className="text-xs font-medium text-neutral-900 flex items-center gap-1">
+          {showForm ? <>Cancel <X className="h-3 w-3" /></> : <>Add note <MapPinned className="h-3 w-3" /></>}
         </button>
+      </div>
+      {showForm && (
+        <div className="rounded-2xl bg-neutral-50 border border-neutral-100 p-3 mb-3">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {NOTE_CATEGORIES.map(c => {
+              const Icon = c.icon;
+              return (
+                <button key={c.key} onClick={() => setCategory(c.key)}
+                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border flex items-center gap-1 ${category === c.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'}`}>
+                  <Icon className="h-3 w-3" /> {c.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Best tea stall here, avoid after 8 PM..."
+              className="h-10 rounded-xl border-neutral-200 bg-white text-sm" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+              {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="space-y-2">
+        {notes.map(n => {
+          const cfg = NOTE_CATEGORIES.find(c => c.key === n.category) || NOTE_CATEGORIES[9];
+          const Icon = cfg.icon;
+          return (
+            <div key={n.id} className={`rounded-2xl border p-3 flex items-start gap-3 ${cfg.color}`}>
+              <div className={`h-8 w-8 rounded-lg ${cfg.dot} flex items-center justify-center shrink-0`}>
+                <Icon className="h-4 w-4 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold capitalize">{cfg.label} · {n.author}</p>
+                  <p className="text-[10px] opacity-70">{new Date(n.created_at).toLocaleDateString()}</p>
+                </div>
+                <p className="text-sm mt-0.5">{n.text}</p>
+                <div className="flex items-center gap-3 mt-2">
+                  <button onClick={() => vote(n.id, 'up')} className="flex items-center gap-1 text-[11px] opacity-80 hover:opacity-100">
+                    <ThumbsUp className="h-3 w-3" /> {n.upvotes || 0}
+                  </button>
+                  <button onClick={() => vote(n.id, 'down')} className="flex items-center gap-1 text-[11px] opacity-70 hover:opacity-100">
+                    <ThumbsDown className="h-3 w-3" /> {n.downvotes || 0}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {notes.length === 0 && !showForm && <p className="text-xs text-neutral-400 text-center py-4">No local tips yet. Be the first!</p>}
       </div>
     </div>
   );
@@ -326,6 +421,7 @@ function ConditionsInline({ routeId, user }) {
   const [type, setType] = useState('pothole');
   const [text, setText] = useState('');
   const [adding, setAdding] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const load = () => fetch(`/api/routes/${routeId}/conditions`).then(r => r.json()).then(setItems).catch(() => {});
   useEffect(() => { load(); }, [routeId]);
   const submit = async () => {
@@ -333,27 +429,47 @@ function ConditionsInline({ routeId, user }) {
     setAdding(true);
     try {
       await fetch(`/api/routes/${routeId}/conditions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user?.uid, author: user?.name, type, text: text.trim() }),
       });
-      setText(''); load();
-      toast.success('Alert posted');
+      setText(''); setShowForm(false); load(); toast.success('Alert posted');
     } finally { setAdding(false); }
   };
   return (
     <div className="mt-6">
-      <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-3">Road conditions · {items.length}</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Road conditions · {items.length}</p>
+        <button onClick={() => setShowForm(!showForm)} className="text-xs font-medium text-neutral-900 flex items-center gap-1">
+          {showForm ? <>Cancel <X className="h-3 w-3" /></> : <>Report <AlertTriangle className="h-3 w-3" /></>}
+        </button>
+      </div>
+      {showForm && (
+        <div className="rounded-2xl border border-neutral-100 p-3 mb-3">
+          <div className="flex gap-1.5 mb-2 overflow-x-auto">
+            {CONDITION_TYPES.map(c => (
+              <button key={c.key} onClick={() => setType(c.key)}
+                className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-medium border ${type === c.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white border-neutral-200'}`}>{c.label}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Describe the issue..."
+              className="h-10 rounded-xl border-neutral-200 bg-neutral-50 text-sm" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+              {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="space-y-2">
         {items.map(i => {
-          const cfg = CONDITION_TYPES.find(c => c.key === i.type) || CONDITION_TYPES[4];
+          const cfg = CONDITION_TYPES.find(c => c.key === i.type) || CONDITION_TYPES[5];
           const Icon = cfg.icon;
           return (
             <div key={i.id} className={`rounded-2xl border p-3 flex items-start gap-3 ${cfg.color}`}>
               <Icon className="h-4 w-4 mt-0.5 shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold capitalize">{cfg.label} • {i.author}</p>
+                  <p className="text-xs font-semibold capitalize">{cfg.label} · {i.author}</p>
                   <p className="text-[10px] opacity-70">{new Date(i.created_at).toLocaleDateString()}</p>
                 </div>
                 <p className="text-sm mt-0.5">{i.text}</p>
@@ -361,26 +477,7 @@ function ConditionsInline({ routeId, user }) {
             </div>
           );
         })}
-        {items.length === 0 && (
-          <p className="text-xs text-neutral-400 text-center py-4">No road alerts yet.</p>
-        )}
-      </div>
-      <div className="mt-3 rounded-2xl border border-neutral-100 p-3">
-        <div className="flex gap-1.5 mb-2 overflow-x-auto">
-          {CONDITION_TYPES.map(c => (
-            <button key={c.key} onClick={() => setType(c.key)}
-              className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-medium border ${type === c.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white border-neutral-200'}`}>
-              {c.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Post a road alert..."
-            className="h-10 rounded-xl border-neutral-200 bg-neutral-50 text-sm" />
-          <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
-            {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </button>
-        </div>
+        {items.length === 0 && !showForm && <p className="text-xs text-neutral-400 text-center py-4">No road alerts yet.</p>}
       </div>
     </div>
   );
@@ -389,7 +486,6 @@ function ConditionsInline({ routeId, user }) {
 function FollowMode({ route, onExit }) {
   const [userPos, setUserPos] = useState(null);
   const [error, setError] = useState(null);
-
   useEffect(() => {
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
@@ -399,7 +495,6 @@ function FollowMode({ route, onExit }) {
     );
     return () => navigator.geolocation.clearWatch(id);
   }, []);
-
   return (
     <div className="fixed inset-0 bg-white flex flex-col z-50">
       <div className="absolute top-6 left-6 right-6 z-[500] flex items-center justify-between">
@@ -412,13 +507,9 @@ function FollowMode({ route, onExit }) {
         <div className="w-10" />
       </div>
       <div className="flex-1">
-        <MapView
-          points={route.points}
+        <MapView points={route.points}
           center={userPos ? [userPos.lat, userPos.lng] : (route.points[0] ? [route.points[0].lat, route.points[0].lng] : null)}
-          zoom={17}
-          follow={!!userPos}
-          interactive
-        />
+          zoom={17} follow={!!userPos} interactive />
       </div>
       <div className="bg-white border-t border-neutral-100 p-4">
         <p className="text-xs text-neutral-500 text-center">
