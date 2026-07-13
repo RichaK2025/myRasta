@@ -1232,11 +1232,24 @@ function Profile({ user, updateName }) {
   );
 }
 
-// ============= SHARE SHEET =============
-function ShareSheet({ route, onClose }) {
+// ============= SHARE SHEET (three states: open | mini | null) =============
+function ShareSheet({ route, mode, setMode }) {
   const [copied, setCopied] = useState(false);
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/r/${route.share_code}` : '';
   const waText = `${route.name} — shared on Raasta.\n\n🗺️ Navigate Like A Local. Use my Raasta link instead of explaining directions on call:\n${shareUrl}`;
+
+  const close = () => setMode(null);
+  const minimize = () => setMode('mini');
+  const expand = () => setMode('open');
+
+  // Auto-minimize after 5s when opened
+  useEffect(() => {
+    if (mode === 'open') {
+      const t = setTimeout(() => setMode('mini'), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [mode, setMode]);
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
@@ -1249,15 +1262,67 @@ function ShareSheet({ route, onClose }) {
       try { await navigator.share({ title: route.name, text: `Route on Raasta: ${route.name}\nNavigate Like A Local.`, url: shareUrl }); } catch {}
     } else { copy(); }
   };
+
+  if (mode === 'mini') {
+    return (
+      <motion.div
+        initial={{ y: 60, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 60, opacity: 0 }}
+        className="fixed bottom-24 left-0 right-0 z-40 pointer-events-none flex justify-center px-4"
+      >
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={expand}
+          className="pointer-events-auto h-12 pl-4 pr-2 rounded-full bg-neutral-900 text-white shadow-2xl shadow-neutral-900/30 flex items-center gap-3 max-w-[92%]"
+        >
+          <Share2 className="h-4 w-4 shrink-0" />
+          <span className="text-sm font-medium truncate">Share Route</span>
+          <span className="text-[10px] text-white/60 truncate hidden xs:inline">{route.name}</span>
+          <span
+            role="button"
+            aria-label="Dismiss share"
+            onClick={(e) => { e.stopPropagation(); close(); }}
+            className="ml-1 h-8 w-8 rounded-full bg-white/10 flex items-center justify-center cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </span>
+        </motion.button>
+      </motion.div>
+    );
+  }
+
+  if (mode !== 'open') return null;
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-        onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-6 pb-10">
-        <div className="h-1 w-12 rounded-full bg-neutral-200 mx-auto mb-6 sm:hidden" />
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+    >
+      {/* Soft backdrop that doesn't fully block detail; tap to minimize */}
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={minimize}
+        className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
+      />
+      <motion.div
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.4 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 80 || info.velocity.y > 400) minimize();
+        }}
+        initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-6 pb-10 shadow-2xl"
+      >
+        <div className="h-1.5 w-12 rounded-full bg-neutral-200 mx-auto mb-5 cursor-grab active:cursor-grabbing" />
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Share route</h3>
-          <button onClick={onClose} className="h-8 w-8 rounded-full bg-neutral-100 flex items-center justify-center">
+          <div>
+            <h3 className="text-lg font-semibold">Share route</h3>
+            <p className="text-[10px] text-neutral-400 mt-0.5">Swipe down to minimize · auto-hides in 5s</p>
+          </div>
+          <button onClick={close} className="h-9 w-9 rounded-full bg-neutral-100 flex items-center justify-center">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1305,8 +1370,12 @@ function App() {
   const [detailId, setDetailId] = useState(null);
   const [recordedData, setRecordedData] = useState(null);
   const [shareRoute, setShareRoute] = useState(null);
+  const [shareMode, setShareMode] = useState(null); // 'open' | 'mini' | null
   const { user, updateName } = useLocalUser();
   useServiceWorker();
+
+  const openShare = (r) => { setShareRoute(r); setShareMode('open'); };
+  const setMode = (m) => { setShareMode(m); if (m === null) setShareRoute(null); };
 
   const goto = (s, id = null) => {
     if (s === 'detail' && id) setDetailId(id);
@@ -1328,19 +1397,21 @@ function App() {
       )}
       {screen === 'save' && recordedData && (
         <Save data={recordedData} user={user} onBack={() => setScreen('record')}
-          onSaved={(r) => { setRecordedData(null); setDetailId(r.id); setShareRoute(r); setScreen('detail'); }} />
+          onSaved={(r) => { setRecordedData(null); setDetailId(r.id); openShare(r); setScreen('detail'); }} />
       )}
       {screen === 'my' && <Library user={user} onOpen={(id) => goto('detail', id)} />}
       {screen === 'explore' && <Explore onOpen={(id) => goto('detail', id)} />}
       {screen === 'profile' && <Profile user={user} updateName={updateName} />}
       {screen === 'detail' && detailId && (
-        <Detail routeId={detailId} user={user} onBack={() => setScreen('home')} onShare={(r) => setShareRoute(r)} />
+        <Detail routeId={detailId} user={user} onBack={() => setScreen('home')} onShare={openShare} />
       )}
 
       {showBottomNav && <BottomNav active={screen} onNav={goto} />}
 
       <AnimatePresence>
-        {shareRoute && <ShareSheet route={shareRoute} onClose={() => setShareRoute(null)} />}
+        {shareRoute && shareMode && (
+          <ShareSheet route={shareRoute} mode={shareMode} setMode={setMode} />
+        )}
       </AnimatePresence>
     </div>
   );
