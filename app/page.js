@@ -387,10 +387,18 @@ function Record({ onBack, onDone }) {
           if (prev.length === 0) return [p];
           const last = prev[prev.length - 1];
           const d = haversine(last, p);
-          if (d * 1000 < 3 && pos.coords.accuracy > 20) return prev;
-          if (pos.coords.accuracy > 30) return prev;
+          const movementMeters = d * 1000;
+          const accuracyMeters = pos.coords.accuracy ?? 999;
+          const speedKmh = (pos.coords.speed ?? 0) * 3.6;
           const dtSec = (p.timestamp - last.timestamp) / 1000;
-          if (dtSec > 0 && (d / dtSec) * 3600 > 220) return prev;
+
+          if (p.timestamp <= last.timestamp) return prev;
+          if (movementMeters < 1) return prev;
+          if (accuracyMeters > 40 && movementMeters < 8) return prev;
+
+          const minDistanceMeters = Math.max(8, Math.min(25, accuracyMeters * 0.75));
+          if (movementMeters < minDistanceMeters && speedKmh < 1.5) return prev;
+          if (dtSec > 0 && (movementMeters / dtSec) * 3.6 > 220) return prev;
           return [...prev, p];
         });
         const spd = (pos.coords.speed ?? 0) * 3.6;
@@ -420,7 +428,7 @@ function Record({ onBack, onDone }) {
   const stopRecording = () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
-    if (points.length < 2) { toast.error('Not enough movement recorded.'); return; }
+    if (points.length < 2 || distanceKm < 0.01) { toast.error('Not enough movement recorded.'); return; }
     clearRouteDraft();
     onDone({
       points, distance_km: distanceKm, duration_sec: elapsed, max_speed_kmh: maxSpeed,

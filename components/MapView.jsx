@@ -58,9 +58,15 @@ export default function MapView({
   routeSegments = [],
   waypoints = [],
 }) {
-  const [mapKey] = useState(() => Math.random().toString(36).slice(2));
+  const [mapKey, setMapKey] = useState(() => Math.random().toString(36).slice(2));
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    if (mounted) {
+      const id = window.setTimeout(() => setMapKey(Math.random().toString(36).slice(2)), 80);
+      return () => window.clearTimeout(id);
+    }
+  }, [mounted, points.length, mapStyle, fit]);
 
   const positions = points.map((p) => [p.lat, p.lng]);
   const initialCenter = center || (positions[0] ? positions[0] : [20.5937, 78.9629]);
@@ -73,7 +79,7 @@ export default function MapView({
   }
 
   return (
-    <div style={{ height, width: '100%' }} className="relative">
+    <div style={{ height, width: '100%' }} className="relative leaflet-map-shell">
       <MapContainer
         key={mapKey}
         center={initialCenter}
