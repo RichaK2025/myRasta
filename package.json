@@ -73,6 +73,7 @@
         "zod": "3.25.67"
     },
     "devDependencies": {
+        "@netlify/plugin-nextjs": "^5.15.12",
         "@types/lodash": "4.17.24",
         "autoprefixer": "10.4.19",
         "globals": "16.2.0",

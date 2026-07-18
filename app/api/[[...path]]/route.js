@@ -19,8 +19,7 @@ function stripId(doc) {
   return rest;
 }
 
-function getPathSegments(request, params) {
-  if (Array.isArray(params?.path)) return params.path;
+function getPathSegments(request) {
   const pathname = request?.nextUrl?.pathname || (request?.url ? new URL(request.url).pathname : '/');
   return pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
 }
@@ -35,8 +34,8 @@ async function getDbOrNull() {
   }
 }
 
-export async function GET(request, { params }) {
-  const segments = getPathSegments(request, params);
+export async function GET(request) {
+  const segments = getPathSegments(request);
   const db = await getDbOrNull();
 
   try {
@@ -138,8 +137,8 @@ export async function GET(request, { params }) {
   }
 }
 
-export async function POST(request, { params }) {
-  const segments = getPathSegments(request, params);
+export async function POST(request) {
+  const segments = getPathSegments(request);
   const db = await getDbOrNull();
 
   try {
@@ -358,8 +357,8 @@ export async function POST(request, { params }) {
   }
 }
 
-export async function DELETE(request, { params }) {
-  const segments = getPathSegments(request, params);
+export async function DELETE(request) {
+  const segments = getPathSegments(request);
   const db = await getDbOrNull();
   try {
     if (!db) {
