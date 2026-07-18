@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
+import { v4 as uuidv4 } from 'uuid';
 import {
   MapPin, Clock, Gauge, Eye, Route as RouteIcon, Loader2, Sparkles, ChevronLeft, Share2,
   Star, AlertTriangle, Zap, Construction, CloudRain, Info, Send, Navigation, MessageCircle,
@@ -46,8 +47,16 @@ function useAnonUser() {
   useEffect(() => {
     let uid = localStorage.getItem('raasta_uid');
     let name = localStorage.getItem('raasta_name');
-    if (!uid) { uid = crypto.randomUUID(); localStorage.setItem('raasta_uid', uid); }
-    if (!name) { name = 'Traveller ' + uid.slice(0, 4).toUpperCase(); localStorage.setItem('raasta_name', name); }
+    if (!uid) {
+      uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : uuidv4();
+      localStorage.setItem('raasta_uid', uid);
+    }
+    if (!name) {
+      name = 'Traveller ' + uid.slice(0, 4).toUpperCase();
+      localStorage.setItem('raasta_name', name);
+    }
     setU({ uid, name });
   }, []);
   return u;
