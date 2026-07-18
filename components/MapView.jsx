@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, useMap, CircleMarker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
-import { getTileConfig, ROUTE_STYLE, START_STYLE, END_STYLE, NOTE_COLORS } from '@/lib/mapProvider';
+import { getTileConfig, ROUTE_STYLE, START_STYLE, END_STYLE, NOTE_COLORS, getSpeedZoneColor } from '@/lib/mapProvider';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -54,6 +54,9 @@ export default function MapView({
   noteMarkers = [],
   onMapClick = null,
   droppedPin = null,
+  mapStyle = 'standard',
+  routeSegments = [],
+  waypoints = [],
 }) {
   const [mapKey] = useState(() => Math.random().toString(36).slice(2));
   const [mounted, setMounted] = useState(false);
@@ -63,7 +66,7 @@ export default function MapView({
   const initialCenter = center || (positions[0] ? positions[0] : [20.5937, 78.9629]);
   const last = positions[positions.length - 1];
   const first = positions[0];
-  const tile = getTileConfig();
+  const tile = getTileConfig(mapStyle);
 
   if (!mounted) {
     return <div style={{ height, width: '100%' }} className="bg-neutral-100 dark:bg-neutral-900 animate-pulse" />;
@@ -84,9 +87,23 @@ export default function MapView({
         attributionControl={false}
       >
         <TileLayer url={tile.url} maxZoom={tile.maxZoom} />
-        {positions.length > 1 && (
+        {positions.length > 1 && routeSegments.length === 0 && (
           <Polyline positions={positions} pathOptions={ROUTE_STYLE} />
         )}
+        {routeSegments.map((segment, index) => {
+          const segmentPositions = (segment.points || []).map((p) => [p.lat, p.lng]);
+          return (
+            <Polyline
+              key={`segment-${index}`}
+              positions={segmentPositions}
+              pathOptions={{
+                ...ROUTE_STYLE,
+                color: segment.color || getSpeedZoneColor(segment.speedKmh),
+                weight: segment.weight || 5,
+              }}
+            />
+          );
+        })}
         {showEnds && first && (
           <CircleMarker center={first} radius={8} pathOptions={START_STYLE} />
         )}
@@ -117,6 +134,18 @@ export default function MapView({
             pathOptions={{ color: '#fff', weight: 3, fillColor: '#0a0a0a', fillOpacity: 1 }}
           />
         )}
+        {waypoints.map((w) => (
+          <CircleMarker
+            key={w.id}
+            center={[w.lat, w.lng]}
+            radius={7}
+            pathOptions={{ color: '#fff', weight: 2, fillColor: '#0f766e', fillOpacity: 1 }}
+          >
+            <Tooltip direction="top" offset={[0, -6]} opacity={1}>
+              <span className="text-xs font-medium">{w.label || 'Waypoint'}</span>
+            </Tooltip>
+          </CircleMarker>
+        ))}
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
         {follow && last && <Recenter center={last} zoom={17} />}
         {fit && positions.length > 1 && <FitBounds points={points} />}

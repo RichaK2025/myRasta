@@ -18,7 +18,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { totalDistance, haversine, formatDuration, formatDistance } from '@/lib/geo';
+import { getSpeedZoneColor } from '@/lib/mapProvider';
 import { cacheRoute, listCached } from '@/lib/offlineCache';
+import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDraft, getAccuracyProfile } from '@/lib/preferences';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -333,15 +335,41 @@ function Record({ onBack, onDone }) {
   const [currentSpeed, setCurrentSpeed] = useState(0);
   const [maxSpeed, setMaxSpeed] = useState(0);
   const [error, setError] = useState(null);
+  const [settings, setSettings] = useState(getSettings());
+  const [waypoints, setWaypoints] = useState([]);
+  const [draftSaved, setDraftSaved] = useState(false);
   const watchIdRef = useRef(null);
   const startTimeRef = useRef(null);
   const timerRef = useRef(null);
   const distanceKm = useMemo(() => totalDistance(points), [points]);
+  const routeStats = useMemo(() => ({
+    distance_km: distanceKm,
+    duration_sec: elapsed,
+    avg_speed_kmh: elapsed > 0 ? (distanceKm / (elapsed / 3600)) : 0,
+    max_speed_kmh: maxSpeed,
+    waypoint_count: waypoints.length,
+  }), [distanceKm, elapsed, maxSpeed, waypoints.length]);
+
+  useEffect(() => {
+    const draft = readRouteDraft();
+    if (draft?.points?.length) {
+      setPoints(draft.points);
+      setElapsed(draft.elapsed || 0);
+      setCurrentSpeed(draft.currentSpeed || 0);
+      setMaxSpeed(draft.maxSpeed || 0);
+      setWaypoints(draft.waypoints || []);
+      setStatus('paused');
+    }
+  }, []);
 
   useEffect(() => () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
   }, []);
+
+  useEffect(() => {
+    saveRouteDraft({ points, elapsed, currentSpeed, maxSpeed, waypoints, status });
+  }, [points, elapsed, currentSpeed, maxSpeed, waypoints, status]);
 
   const startRecording = () => {
     if (!navigator.geolocation) { setError('Geolocation not supported.'); return; }
@@ -350,6 +378,7 @@ function Record({ onBack, onDone }) {
     timerRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 500);
+    const profile = getAccuracyProfile(settings.accuracy);
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, timestamp: pos.timestamp,
@@ -358,11 +387,8 @@ function Record({ onBack, onDone }) {
           if (prev.length === 0) return [p];
           const last = prev[prev.length - 1];
           const d = haversine(last, p);
-          // Drop near-duplicate noise from a poor fix.
           if (d * 1000 < 3 && pos.coords.accuracy > 20) return prev;
-          // Drop fixes too imprecise to trust (GPS drift / multipath jumps).
           if (pos.coords.accuracy > 30) return prev;
-          // Drop implied-speed outliers — a fix that would require teleporting.
           const dtSec = (p.timestamp - last.timestamp) / 1000;
           if (dtSec > 0 && (d / dtSec) * 3600 > 220) return prev;
           return [...prev, p];
@@ -371,7 +397,7 @@ function Record({ onBack, onDone }) {
         setCurrentSpeed(spd); setMaxSpeed((m) => Math.max(m, spd));
       },
       (err) => { setError(err.message); toast.error('Location error: ' + err.message); },
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+      { enableHighAccuracy: profile.enableHighAccuracy, maximumAge: profile.maximumAge, timeout: profile.timeout }
     );
   };
 
@@ -382,14 +408,27 @@ function Record({ onBack, onDone }) {
     if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null;
   };
 
+  const addWaypoint = () => {
+    if (!points.length) return;
+    const marker = points[points.length - 1];
+    const label = `Waypoint ${waypoints.length + 1}`;
+    const item = { id: `${Date.now()}`, lat: marker.lat, lng: marker.lng, label, created_at: new Date().toISOString() };
+    setWaypoints((prev) => [...prev, item]);
+    toast.success('Waypoint added');
+  };
+
   const stopRecording = () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
     if (points.length < 2) { toast.error('Not enough movement recorded.'); return; }
+    clearRouteDraft();
     onDone({
       points, distance_km: distanceKm, duration_sec: elapsed, max_speed_kmh: maxSpeed,
       avg_speed_kmh: elapsed > 0 ? (distanceKm / (elapsed / 3600)) : 0,
       start: points[0], end: points[points.length - 1],
+      waypoints,
+      route_stats: routeStats,
+      tracking_settings: settings,
     });
   };
 
@@ -409,6 +448,16 @@ function Record({ onBack, onDone }) {
   };
 
   const last = points[points.length - 1];
+  const routeSegments = useMemo(() => {
+    const segments = [];
+    for (let i = 1; i < points.length; i += 1) {
+      const prev = points[i - 1];
+      const next = points[i];
+      const speedKmh = ((next.speed || 0) * 3.6);
+      segments.push({ points: [prev, next], speedKmh, color: getSpeedZoneColor(speedKmh) });
+    }
+    return segments;
+  }, [points]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950 flex flex-col">
@@ -440,16 +489,30 @@ function Record({ onBack, onDone }) {
             )}
           </div>
         ) : (
-          <MapView points={points} follow={status === 'recording'} center={last ? [last.lat, last.lng] : null} zoom={17} />
+          <MapView points={points} follow={status === 'recording'} center={last ? [last.lat, last.lng] : null} zoom={17} mapStyle={settings.mapStyle} routeSegments={routeSegments} waypoints={waypoints} />
         )}
       </div>
 
       <div className="bg-white dark:bg-neutral-900 border-t border-neutral-100 dark:border-neutral-800 rounded-t-3xl -mt-6 relative z-10 shadow-2xl">
         <div className="px-6 pt-6 pb-8">
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-3 gap-4 mb-4">
             <Stat label="Distance" value={formatDistance(distanceKm)} />
             <Stat label="Time" value={formatDuration(elapsed)} />
             <Stat label="Speed" value={`${currentSpeed.toFixed(1)} km/h`} />
+          </div>
+          <div className="mb-4 rounded-2xl border border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 p-3 text-xs text-neutral-600 dark:text-neutral-300">
+            <div className="flex items-center justify-between">
+              <span>Accuracy profile</span>
+              <span className="font-medium capitalize">{settings.accuracy}</span>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <span>Waypoints</span>
+              <span className="font-medium">{waypoints.length}</span>
+            </div>
+          </div>
+          <div className="flex gap-2 mb-4">
+            <button onClick={addWaypoint} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">Add waypoint</button>
+            <button onClick={() => { const next = saveSettings({ mapStyle: settings.mapStyle === 'satellite' ? 'standard' : 'satellite' }); setSettings(next); }} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">Map: {settings.mapStyle}</button>
           </div>
           {status === 'idle' && (
             <div className="space-y-2">
@@ -511,6 +574,7 @@ function MiniStat({ icon, label, value }) {
 
 // ============= SAVE =============
 function Save({ data, user, onBack, onSaved }) {
+  const [settings, setSettings] = useState(getSettings());
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [routeType, setRouteType] = useState('Commute');
@@ -527,7 +591,7 @@ function Save({ data, user, onBack, onSaved }) {
       const res = await fetch('/api/routes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, name: name.trim(), description: description.trim(), route_type: routeType,
-          tags, notes: notes.trim(), creator_name: user?.name || 'Anonymous', user_id: user?.uid }),
+          tags, notes: notes.trim(), creator_name: user?.name || 'Anonymous', user_id: user?.uid, waypoints: data.waypoints || [], route_stats: data.route_stats, tracking_settings: data.tracking_settings }),
       });
       const created = await res.json();
       cacheRoute(created);
@@ -549,12 +613,22 @@ function Save({ data, user, onBack, onSaved }) {
       </div>
       <div className="px-6">
         <div className="rounded-3xl overflow-hidden border border-neutral-100 dark:border-neutral-800 h-48">
-          <MapView points={data.points} fit interactive={false} />
+          <MapView points={data.points} fit interactive={false} waypoints={data.waypoints || []} mapStyle={settings.mapStyle} routeSegments={data.points.length > 1 ? data.points.slice(1).map((point, index) => ({ points: [data.points[index], point], speedKmh: point.speed * 3.6, color: getSpeedZoneColor(point.speed * 3.6) })) : []} />
         </div>
         <div className="grid grid-cols-3 gap-4 mt-4 py-3 px-2">
           <MiniStat icon={<RouteIcon className="h-4 w-4" />} label="Distance" value={formatDistance(data.distance_km)} />
           <MiniStat icon={<Clock className="h-4 w-4" />} label="Time" value={formatDuration(data.duration_sec)} />
           <MiniStat icon={<Gauge className="h-4 w-4" />} label="Avg" value={`${data.avg_speed_kmh?.toFixed(1) || 0} km/h`} />
+        </div>
+        <div className="mt-4 rounded-2xl border border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 p-3 text-sm">
+          <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+            <span>Analytics snapshot</span>
+            <span className="font-medium text-neutral-900 dark:text-white">{data.route_stats?.waypoint_count || 0} waypoints</span>
+          </div>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span>Peak speed</span>
+            <span className="font-semibold">{data.route_stats?.max_speed_kmh?.toFixed(1) || 0} km/h</span>
+          </div>
         </div>
         <div className="mt-6 space-y-5">
           <div>
@@ -1204,13 +1278,59 @@ function ThemeToggle() {
 }
 
 function SettingsSection() {
+  const [settings, setSettings] = useState(getSettings());
+  const update = (next) => {
+    const merged = saveSettings(next);
+    setSettings(merged);
+  };
   return (
     <div className="mt-4 rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5">
       <div className="flex items-center gap-2 mb-4">
         <Settings className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
-        <p className="text-xs font-semibold text-neutral-900 dark:text-white uppercase tracking-wider">Settings</p>
+        <p className="text-xs font-semibold text-neutral-900 dark:text-white uppercase tracking-wider">Tracking settings</p>
       </div>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Appearance</p>
+      <div className="space-y-3">
+        <div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Map style</p>
+          <div className="grid grid-cols-3 gap-2">
+            {['standard','satellite','terrain'].map((value) => (
+              <button key={value} onClick={() => update({ mapStyle: value })} className={`rounded-2xl border px-3 py-2 text-sm capitalize ${settings.mapStyle === value ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300'}`}>
+                {value}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Accuracy profile</p>
+          <div className="grid grid-cols-3 gap-2">
+            {['high','balanced','battery'].map((value) => (
+              <button key={value} onClick={() => update({ accuracy: value })} className={`rounded-2xl border px-3 py-2 text-sm capitalize ${settings.accuracy === value ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300'}`}>
+                {value}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Units</p>
+          <div className="grid grid-cols-2 gap-2">
+            {['metric','imperial'].map((value) => (
+              <button key={value} onClick={() => update({ units: value })} className={`rounded-2xl border px-3 py-2 text-sm capitalize ${settings.units === value ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300'}`}>
+                {value}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center justify-between rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 px-3 py-2">
+          <div>
+            <p className="text-sm font-medium">Auto-pause</p>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400">Pause when movement stops</p>
+          </div>
+          <button onClick={() => update({ autoPause: !settings.autoPause })} className={`px-3 py-1.5 rounded-full text-xs font-medium ${settings.autoPause ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200'}`}>
+            {settings.autoPause ? 'On' : 'Off'}
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2 mt-4">Appearance</p>
       <ThemeToggle />
     </div>
   );
