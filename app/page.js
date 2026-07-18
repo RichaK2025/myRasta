@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { totalDistance, haversine, formatDuration, formatDistance } from '@/lib/geo';
+import Link from 'next/link';
 import { getSpeedZoneColor } from '@/lib/mapProvider';
 import { cacheRoute, listCached } from '@/lib/offlineCache';
 import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDraft, getAccuracyProfile } from '@/lib/preferences';
@@ -229,6 +230,16 @@ function Home({ onNav, user }) {
             <p className="text-sm font-medium">Explore</p>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Community routes</p>
           </motion.button>
+        </div>
+
+        <div className="mt-3 rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 bg-neutral-50 dark:bg-neutral-900">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Community</p>
+              <p className="text-sm font-semibold mt-1">View public routes from everyone</p>
+            </div>
+            <Link href="/community" className="text-sm font-medium text-neutral-900 dark:text-white">Open feed</Link>
+          </div>
         </div>
 
         {trending.length > 0 && (

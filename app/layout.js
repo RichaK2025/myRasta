@@ -36,6 +36,8 @@ export default function RootLayout({ children }) {
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossOrigin=""
         />
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#0a0a0a" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body className="antialiased bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100 min-h-screen">

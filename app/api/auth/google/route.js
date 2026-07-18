@@ -1,0 +1,53 @@
+import { NextResponse } from 'next/server';
+import { OAuth2Client } from 'google-auth-library';
+import jwt from 'jsonwebtoken';
+import { getDb } from '@/lib/mongodb';
+
+export const runtime = 'nodejs';
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+export async function POST(request) {
+  try {
+    const { idToken } = await request.json();
+    if (!idToken) {
+      return NextResponse.json({ error: 'Missing Google token' }, { status: 400 });
+    }
+
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload?.email) {
+      return NextResponse.json({ error: 'Invalid Google token' }, { status: 401 });
+    }
+
+    const db = await getDb();
+    const existing = await db.collection('users').findOne({ google_id: payload.sub });
+
+    const userDoc = existing || await db.collection('users').insertOne({
+      google_id: payload.sub,
+      email: payload.email,
+      name: payload.name || payload.email,
+      picture: payload.picture || null,
+      created_at: new Date().toISOString(),
+    });
+
+    const user = existing || await db.collection('users').findOne({ _id: userDoc.insertedId });
+    const token = jwt.sign({ sub: user.google_id, email: user.email }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '30d' });
+
+    const response = NextResponse.json({ ok: true, user: { id: user.google_id, email: user.email, name: user.name, picture: user.picture } });
+    response.cookies.set('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 30,
+    });
+
+    return response;
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
