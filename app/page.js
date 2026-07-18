@@ -24,6 +24,7 @@ import { cacheRoute, listCached } from '@/lib/offlineCache';
 import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDraft, getAccuracyProfile } from '@/lib/preferences';
 import { useAuth } from '@/lib/useAuth';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { fetchJson } from '@/lib/utils';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -166,8 +167,8 @@ function Home({ onNav, user }) {
   useEffect(() => {
     if (!user) return;
     if (!online) { setMyRoutes(listCached()); return; }
-    fetch(`/api/routes?user_id=${user.uid}`).then(r => r.json()).then(setMyRoutes).catch(() => setMyRoutes(listCached()));
-    fetch(`/api/routes?sort=trending`).then(r => r.json()).then(setTrending).catch(() => {});
+    fetchJson(`/api/routes?user_id=${user.uid}`).then(setMyRoutes).catch(() => setMyRoutes(listCached()));
+    fetchJson(`/api/routes?sort=trending`).then(setTrending).catch(() => {});
   }, [user, online]);
 
   return (
@@ -822,7 +823,7 @@ function CommunityNotes({ routeId, user, points }) {
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
 
-  const load = () => fetch(`/api/routes/${routeId}/notes`).then(r => r.json()).then(setItems).catch(() => {});
+  const load = () => fetchJson(`/api/routes/${routeId}/notes`).then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, [routeId]);
 
   const submit = async () => {
@@ -920,7 +921,7 @@ function Conditions({ routeId, user }) {
   const [text, setText] = useState('');
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const load = () => fetch(`/api/routes/${routeId}/conditions`).then(r => r.json()).then(setItems).catch(() => {});
+  const load = () => fetchJson(`/api/routes/${routeId}/conditions`).then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, [routeId]);
 
   const submit = async () => {
@@ -990,7 +991,7 @@ function Comments({ routeId, user }) {
   const [items, setItems] = useState([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  const load = () => fetch(`/api/routes/${routeId}/comments`).then(r => r.json()).then(setItems).catch(() => {});
+  const load = () => fetchJson(`/api/routes/${routeId}/comments`).then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, [routeId]);
   const send = async () => {
     if (!text.trim()) return;
@@ -1078,11 +1079,11 @@ function Detail({ routeId, onBack, onShare, user }) {
   const [notes, setNotes] = useState([]);
 
   const load = () => {
-    fetch(`/api/routes/${routeId}`).then((r) => r.json()).then((r) => {
+    fetchJson(`/api/routes/${routeId}`).then((r) => {
       setRoute(r); cacheRoute(r); setLoading(false);
       if (!r.ai_summary) genSummary(r.id);
-    });
-    fetch(`/api/routes/${routeId}/notes`).then(r => r.json()).then(setNotes).catch(() => {});
+    }).catch(() => setLoading(false));
+    fetchJson(`/api/routes/${routeId}/notes`).then(setNotes).catch(() => setNotes([]));
   };
   const genSummary = async (id) => {
     setAiLoading(true);
@@ -1193,7 +1194,7 @@ function Explore({ onBack, onOpen }) {
     } else {
       url = `/api/routes?sort=trending`; // filter client-side by tag
     }
-    fetch(url).then(r => r.json()).then((data) => {
+    fetchJson(url).then((data) => {
       if (cat !== 'trending' && cat !== 'popular') {
         setRoutes(data.filter(r => r.tags?.includes(cat)));
       } else setRoutes(data);
@@ -1243,7 +1244,7 @@ function Library({ user, onOpen }) {
   const [q, setQ] = useState('');
   useEffect(() => {
     if (!user) return;
-    fetch(`/api/routes?user_id=${user.uid}`).then(r => r.json()).then(setRoutes).catch(() => setRoutes([]));
+    fetchJson(`/api/routes?user_id=${user.uid}`).then(setRoutes).catch(() => setRoutes([]));
   }, [user]);
   const filtered = (routes || []).filter(r =>
     !q || r.name.toLowerCase().includes(q.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(q.toLowerCase()))
@@ -1369,9 +1370,9 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
   useEffect(() => { setName(user?.name || ''); }, [user]);
   useEffect(() => {
     if (!user) return;
-    fetch(`/api/routes?user_id=${user.uid}`).then(r => r.json()).then((rts) => {
+    fetchJson(`/api/routes?user_id=${user.uid}`).then((rts) => {
       setStats({ routes: rts.length, verifications: rts.reduce((a, r) => a + (r.verified_count || 0), 0) });
-    });
+    }).catch(() => setStats({ routes: 0, verifications: 0 }));
   }, [user]);
   const save = () => {
     if (name.trim()) { updateName(name.trim()); setEditing(false); toast.success('Profile updated'); }

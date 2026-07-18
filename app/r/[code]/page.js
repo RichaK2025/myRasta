@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { formatDistance, formatDuration } from '@/lib/geo';
 import { QRCodeSVG } from 'qrcode.react';
 import { cacheRoute, getCachedRoute } from '@/lib/offlineCache';
+import { fetchJson } from '@/lib/utils';
 import { toast } from 'sonner';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
@@ -85,7 +86,7 @@ export default function SharePage() {
         } else {
           setRoute(r); cacheRoute(r);
           if (!r.ai_summary) genSummary(r.id);
-          fetch(`/api/routes/${r.id}/notes`).then(x => x.json()).then(setNotes).catch(() => {});
+          fetchJson(`/api/routes/${r.id}/notes`).then(setNotes).catch(() => setNotes([]));
         }
         setLoading(false);
       })
@@ -245,7 +246,7 @@ export default function SharePage() {
             </div>
           )}
 
-          <CommunityNotesInline routeId={route.id} user={user} notes={notes} reload={() => fetch(`/api/routes/${route.id}/notes`).then(r => r.json()).then(setNotes)} />
+          <CommunityNotesInline routeId={route.id} user={user} notes={notes} reload={() => fetchJson(`/api/routes/${route.id}/notes`).then(setNotes).catch(() => setNotes([]))} />
           <ConditionsInline routeId={route.id} user={user} />
 
           <div className="mt-6 rounded-2xl bg-neutral-50 border border-neutral-100 p-4 flex items-center gap-4">
@@ -431,7 +432,7 @@ function ConditionsInline({ routeId, user }) {
   const [text, setText] = useState('');
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const load = () => fetch(`/api/routes/${routeId}/conditions`).then(r => r.json()).then(setItems).catch(() => {});
+  const load = () => fetchJson(`/api/routes/${routeId}/conditions`).then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, [routeId]);
   const submit = async () => {
     if (!text.trim()) return;
