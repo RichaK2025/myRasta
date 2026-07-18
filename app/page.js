@@ -3,13 +3,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useTheme } from 'next-themes';
 import {
   MapPin, Play, Pause, Square, ChevronLeft, Share2, Copy, MessageCircle,
   Route as RouteIcon, Compass, Search, Heart, Eye, Clock, Gauge, Sparkles,
   Bookmark, Check, X, Loader2, Star, AlertTriangle, TrendingUp, Flame, WifiOff, Send,
   Zap, Info, CloudRain, Construction, ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield,
   Camera, Mountain, Church, Baby, Bike, Truck, User, Home as HomeIcon, Library as LibraryIcon,
-  MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Umbrella
+  MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Moon, Monitor, Settings, Umbrella
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -107,7 +108,7 @@ function Splash({ onDone }) {
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 flex flex-col items-center justify-center bg-white z-50"
+      className="fixed inset-0 flex flex-col items-center justify-center bg-white dark:bg-neutral-950 z-50"
     >
       <motion.div
         initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -119,7 +120,7 @@ function Splash({ onDone }) {
         <motion.h1 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}
           className="mt-6 text-3xl font-semibold tracking-tight">Raasta</motion.h1>
         <motion.p initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.5 }}
-          className="mt-2 text-sm text-neutral-500">Navigate Like A Local.</motion.p>
+          className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Navigate Like A Local.</motion.p>
       </motion.div>
     </motion.div>
   );
@@ -137,7 +138,7 @@ function BottomNav({ active, onNav }) {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none">
       <div className="max-w-md mx-auto px-4 pb-4 pointer-events-auto">
-        <div className="bg-white rounded-3xl border border-neutral-100 shadow-2xl shadow-neutral-900/10 px-2 py-2">
+        <div className="bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-100 dark:border-neutral-800 shadow-2xl shadow-neutral-900/10 px-2 py-2">
           <div className="grid grid-cols-5">
             {items.map((it) => {
               const Icon = it.icon;
@@ -145,8 +146,8 @@ function BottomNav({ active, onNav }) {
               if (it.primary) {
                 return (
                   <button key={it.key} onClick={() => onNav(it.key)} className="flex flex-col items-center justify-center py-1">
-                    <div className="h-11 w-11 rounded-2xl bg-neutral-900 text-white flex items-center justify-center shadow-lg">
-                      <Icon className="h-5 w-5" fill="white" />
+                    <div className="h-11 w-11 rounded-2xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center shadow-lg">
+                      <Icon className="h-5 w-5" fill="currentColor" />
                     </div>
                     <span className="text-[10px] mt-1 font-medium">{it.label}</span>
                   </button>
@@ -154,7 +155,7 @@ function BottomNav({ active, onNav }) {
               }
               return (
                 <button key={it.key} onClick={() => onNav(it.key)}
-                  className={`flex flex-col items-center justify-center py-2 ${isActive ? 'text-neutral-900' : 'text-neutral-400'}`}>
+                  className={`flex flex-col items-center justify-center py-2 ${isActive ? 'text-neutral-900 dark:text-white' : 'text-neutral-400 dark:text-neutral-500'}`}>
                   <Icon className="h-5 w-5" />
                   <span className={`text-[10px] mt-1 ${isActive ? 'font-semibold' : 'font-normal'}`}>{it.label}</span>
                 </button>
@@ -181,62 +182,50 @@ function Home({ onNav, user }) {
   }, [user, online]);
 
   return (
-    <div className="min-h-screen bg-white pb-28">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
       <div className="px-6 pt-14 pb-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs text-neutral-500">Hi {user?.name?.split(' ')[0] || 'there'} 👋</p>
-            <h1 className="text-3xl font-semibold tracking-tight mt-1">Navigate<br /><span className="text-neutral-400">Like A Local.</span></h1>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">Hi {user?.name?.split(' ')[0] || 'there'} 👋</p>
+            <h1 className="text-3xl font-semibold tracking-tight mt-1">Navigate<br /><span className="text-neutral-400 dark:text-neutral-500">Like A Local.</span></h1>
           </div>
         </div>
-        <p className="text-xs text-neutral-500 mt-3 leading-relaxed max-w-[85%]">
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-3 leading-relaxed max-w-[85%]">
           Google Maps gives directions. Raasta gives recommendations — from real people who know the road.
         </p>
         {!online && (
-          <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-100 px-4 py-2.5 flex items-center gap-2">
-            <WifiOff className="h-4 w-4 text-amber-700" />
-            <p className="text-xs text-amber-800">You’re offline. Showing cached routes.</p>
+          <div className="mt-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900 px-4 py-2.5 flex items-center gap-2">
+            <WifiOff className="h-4 w-4 text-amber-700 dark:text-amber-500" />
+            <p className="text-xs text-amber-800 dark:text-amber-400">You’re offline. Showing cached routes.</p>
           </div>
         )}
       </div>
 
       <div className="px-6">
-        <motion.a href="/index.html" whileTap={{ scale: 0.98 }} 
-          className="w-full rounded-3xl bg-neutral-900 text-white p-6 flex items-center justify-between shadow-xl shadow-neutral-900/10">
-          <div className="text-left">
-            <p className="text-xs text-neutral-400 uppercase tracking-wider">Open landing</p>
-            <h2 className="text-2xl font-semibold mt-1">Overview Page</h2>
-            <p className="text-sm text-neutral-400 mt-1">See the project entry point and app purpose</p>
-          </div>
-          <div className="h-14 w-14 rounded-full bg-white/10 flex items-center justify-center">
-            <Compass className="h-6 w-6" />
-          </div>
-        </motion.a>
-
         <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('record')}
-          className="w-full rounded-3xl bg-neutral-900 text-white p-6 flex items-center justify-between shadow-xl shadow-neutral-900/10 mt-3">
+          className="w-full rounded-3xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 p-6 flex items-center justify-between shadow-xl shadow-neutral-900/10">
           <div className="text-left">
-            <p className="text-xs text-neutral-400 uppercase tracking-wider">Start new</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Start new</p>
             <h2 className="text-2xl font-semibold mt-1">Record Route</h2>
-            <p className="text-sm text-neutral-400 mt-1">Trace your journey with GPS</p>
+            <p className="text-sm text-neutral-400 dark:text-neutral-500 mt-1">Trace your journey with GPS</p>
           </div>
-          <div className="h-14 w-14 rounded-full bg-white/10 flex items-center justify-center">
-            <Play className="h-6 w-6" fill="white" />
+          <div className="h-14 w-14 rounded-full bg-white/10 dark:bg-neutral-900/10 flex items-center justify-center">
+            <Play className="h-6 w-6" fill="currentColor" />
           </div>
         </motion.button>
 
         <div className="grid grid-cols-2 gap-3 mt-3">
           <motion.button whileTap={{ scale: 0.97 }} onClick={() => onNav('my')}
-            className="rounded-3xl bg-neutral-50 border border-neutral-100 p-5 text-left">
+            className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5 text-left">
             <Bookmark className="h-5 w-5 mb-3" />
             <p className="text-sm font-medium">My Library</p>
-            <p className="text-xs text-neutral-500 mt-0.5">{myRoutes.length} saved</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{myRoutes.length} saved</p>
           </motion.button>
           <motion.button whileTap={{ scale: 0.97 }} onClick={() => onNav('explore')}
-            className="rounded-3xl bg-neutral-50 border border-neutral-100 p-5 text-left">
+            className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5 text-left">
             <Compass className="h-5 w-5 mb-3" />
             <p className="text-sm font-medium">Explore</p>
-            <p className="text-xs text-neutral-500 mt-0.5">Community routes</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Community routes</p>
           </motion.button>
         </div>
 
@@ -245,9 +234,9 @@ function Home({ onNav, user }) {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
-                <h3 className="text-sm font-semibold text-neutral-900">Trending routes</h3>
+                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">Trending routes</h3>
               </div>
-              <button onClick={() => onNav('explore')} className="text-xs text-neutral-500">See all</button>
+              <button onClick={() => onNav('explore')} className="text-xs text-neutral-500 dark:text-neutral-400">See all</button>
             </div>
             <div className="space-y-3">
               {trending.slice(0, 3).map((r) => (
@@ -259,16 +248,16 @@ function Home({ onNav, user }) {
 
         <div className="mt-8">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-neutral-900">Your recent routes</h3>
+            <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">Your recent routes</h3>
             {myRoutes.length > 0 && (
-              <button onClick={() => onNav('my')} className="text-xs text-neutral-500">See all</button>
+              <button onClick={() => onNav('my')} className="text-xs text-neutral-500 dark:text-neutral-400">See all</button>
             )}
           </div>
           {myRoutes.length === 0 ? (
-            <div className="rounded-3xl bg-neutral-50 border border-dashed border-neutral-200 p-8 text-center">
-              <MapPin className="h-8 w-8 mx-auto text-neutral-300" />
-              <p className="mt-3 text-sm font-medium text-neutral-700">No routes yet</p>
-              <p className="text-xs text-neutral-500 mt-1">Record your first journey to share the local way.</p>
+            <div className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-dashed border-neutral-200 dark:border-neutral-700 p-8 text-center">
+              <MapPin className="h-8 w-8 mx-auto text-neutral-300 dark:text-neutral-600" />
+              <p className="mt-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">No routes yet</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Record your first journey to share the local way.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -287,12 +276,12 @@ function Home({ onNav, user }) {
 function RouteCard({ route, onOpen }) {
   return (
     <motion.div whileTap={{ scale: 0.98 }} onClick={onOpen}
-      className="rounded-3xl border border-neutral-100 bg-white overflow-hidden shadow-sm cursor-pointer">
-      <div className="h-36 bg-neutral-100 relative">
+      className="rounded-3xl border border-neutral-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-sm cursor-pointer">
+      <div className="h-36 bg-neutral-100 dark:bg-neutral-800 relative">
         {route.points?.length > 1 ? (
           <MapView points={route.points} fit interactive={false} showEnds height="100%" />
         ) : (
-          <div className="h-full flex items-center justify-center text-neutral-300">
+          <div className="h-full flex items-center justify-center text-neutral-300 dark:text-neutral-600">
             <MapPin className="h-8 w-8" />
           </div>
         )}
@@ -311,13 +300,13 @@ function RouteCard({ route, onOpen }) {
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h4 className="font-semibold truncate">{route.name}</h4>
-            <p className="text-xs text-neutral-500 mt-0.5">by {route.creator_name}</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">by {route.creator_name}</p>
           </div>
           {route.route_type && (
             <Badge variant="secondary" className="rounded-full text-[10px] font-normal shrink-0">{route.route_type}</Badge>
           )}
         </div>
-        <div className="flex items-center gap-3 mt-3 text-xs text-neutral-600 flex-wrap">
+        <div className="flex items-center gap-3 mt-3 text-xs text-neutral-600 dark:text-neutral-400 flex-wrap">
           <span className="flex items-center gap-1"><RouteIcon className="h-3.5 w-3.5" /> {formatDistance(route.distance_km || 0)}</span>
           <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {formatDuration(route.duration_sec || 0)}</span>
           <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" /> {route.views || 0}</span>
@@ -327,7 +316,7 @@ function RouteCard({ route, onOpen }) {
         {route.tags?.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-3">
             {route.tags.slice(0, 3).map((t) => (
-              <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-700">{t}</span>
+              <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">{t}</span>
             ))}
           </div>
         )}
@@ -369,7 +358,13 @@ function Record({ onBack, onDone }) {
           if (prev.length === 0) return [p];
           const last = prev[prev.length - 1];
           const d = haversine(last, p);
+          // Drop near-duplicate noise from a poor fix.
           if (d * 1000 < 3 && pos.coords.accuracy > 20) return prev;
+          // Drop fixes too imprecise to trust (GPS drift / multipath jumps).
+          if (pos.coords.accuracy > 30) return prev;
+          // Drop implied-speed outliers — a fix that would require teleporting.
+          const dtSec = (p.timestamp - last.timestamp) / 1000;
+          if (dtSec > 0 && (d / dtSec) * 3600 > 220) return prev;
           return [...prev, p];
         });
         const spd = (pos.coords.speed ?? 0) * 3.6;
@@ -416,12 +411,12 @@ function Record({ onBack, onDone }) {
   const last = points[points.length - 1];
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 flex flex-col">
       <div className="absolute top-6 left-6 right-6 z-[500] flex items-center justify-between">
-        <button onClick={onBack} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-white dark:bg-neutral-900 shadow-lg flex items-center justify-center">
           <ChevronLeft className="h-5 w-5" />
         </button>
-        <div className="px-4 py-2 rounded-full bg-white shadow-lg text-xs font-medium flex items-center gap-2">
+        <div className="px-4 py-2 rounded-full bg-white dark:bg-neutral-900 shadow-lg text-xs font-medium flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${status === 'recording' ? 'bg-red-500 animate-pulse' : 'bg-neutral-300'}`} />
           {status === 'recording' ? 'Recording' : status === 'paused' ? 'Paused' : 'Ready'}
         </div>
@@ -430,15 +425,15 @@ function Record({ onBack, onDone }) {
 
       <div className="flex-1 relative min-h-[55vh]">
         {points.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-50 px-6">
-            <div className="h-16 w-16 rounded-full bg-neutral-900 flex items-center justify-center mb-4">
-              <MapPin className="h-8 w-8 text-white" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-50 dark:bg-neutral-900 px-6">
+            <div className="h-16 w-16 rounded-full bg-neutral-900 dark:bg-white flex items-center justify-center mb-4">
+              <MapPin className="h-8 w-8 text-white dark:text-neutral-900" />
             </div>
-            <p className="text-sm text-neutral-500 text-center">Press start to begin tracking your route</p>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 text-center">Press start to begin tracking your route</p>
             {error && (
               <>
                 <p className="text-xs text-red-500 mt-3 px-4 text-center">{error}</p>
-                <button onClick={simulateRoute} className="mt-3 text-xs px-4 py-2 rounded-full bg-neutral-100 border border-neutral-200">
+                <button onClick={simulateRoute} className="mt-3 text-xs px-4 py-2 rounded-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700">
                   Try demo route instead
                 </button>
               </>
@@ -449,7 +444,7 @@ function Record({ onBack, onDone }) {
         )}
       </div>
 
-      <div className="bg-white border-t border-neutral-100 rounded-t-3xl -mt-6 relative z-10 shadow-2xl">
+      <div className="bg-white dark:bg-neutral-900 border-t border-neutral-100 dark:border-neutral-800 rounded-t-3xl -mt-6 relative z-10 shadow-2xl">
         <div className="px-6 pt-6 pb-8">
           <div className="grid grid-cols-3 gap-4 mb-6">
             <Stat label="Distance" value={formatDistance(distanceKm)} />
@@ -459,16 +454,16 @@ function Record({ onBack, onDone }) {
           {status === 'idle' && (
             <div className="space-y-2">
               <motion.button whileTap={{ scale: 0.97 }} onClick={startRecording}
-                className="w-full h-16 rounded-full bg-neutral-900 text-white text-base font-semibold flex items-center justify-center gap-2 shadow-lg">
-                <Play className="h-5 w-5" fill="white" /> Start Recording
+                className="w-full h-16 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-base font-semibold flex items-center justify-center gap-2 shadow-lg">
+                <Play className="h-5 w-5" fill="currentColor" /> Start Recording
               </motion.button>
-              <button onClick={simulateRoute} className="w-full text-xs text-neutral-500 py-2">Demo mode (simulate a route)</button>
+              <button onClick={simulateRoute} className="w-full text-xs text-neutral-500 dark:text-neutral-400 py-2">Demo mode (simulate a route)</button>
             </div>
           )}
           {status === 'recording' && (
             <div className="grid grid-cols-2 gap-3">
               <motion.button whileTap={{ scale: 0.97 }} onClick={pauseRecording}
-                className="h-16 rounded-full bg-neutral-100 text-neutral-900 font-semibold flex items-center justify-center gap-2">
+                className="h-16 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-semibold flex items-center justify-center gap-2">
                 <Pause className="h-5 w-5" /> Pause
               </motion.button>
               <motion.button whileTap={{ scale: 0.97 }} onClick={stopRecording}
@@ -480,8 +475,8 @@ function Record({ onBack, onDone }) {
           {status === 'paused' && (
             <div className="grid grid-cols-2 gap-3">
               <motion.button whileTap={{ scale: 0.97 }} onClick={startRecording}
-                className="h-16 rounded-full bg-neutral-900 text-white font-semibold flex items-center justify-center gap-2">
-                <Play className="h-5 w-5" fill="white" /> Resume
+                className="h-16 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold flex items-center justify-center gap-2">
+                <Play className="h-5 w-5" fill="currentColor" /> Resume
               </motion.button>
               <motion.button whileTap={{ scale: 0.97 }} onClick={stopRecording}
                 className="h-16 rounded-full bg-red-500 text-white font-semibold flex items-center justify-center gap-2">
@@ -498,7 +493,7 @@ function Record({ onBack, onDone }) {
 function Stat({ label, value }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p>
+      <p className="text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">{label}</p>
       <p className="text-xl font-semibold tabular-nums mt-0.5">{value}</p>
     </div>
   );
@@ -507,8 +502,8 @@ function Stat({ label, value }) {
 function MiniStat({ icon, label, value }) {
   return (
     <div className="text-center">
-      <div className="flex justify-center text-neutral-400">{icon}</div>
-      <p className="text-[10px] uppercase tracking-wider text-neutral-500 mt-1">{label}</p>
+      <div className="flex justify-center text-neutral-400 dark:text-neutral-500">{icon}</div>
+      <p className="text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mt-1">{label}</p>
       <p className="text-sm font-semibold mt-0.5">{value}</p>
     </div>
   );
@@ -544,16 +539,16 @@ function Save({ data, user, onBack, onSaved }) {
   };
 
   return (
-    <div className="min-h-screen bg-white pb-32">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-32">
       <div className="px-6 pt-14 pb-4 flex items-center justify-between">
-        <button onClick={onBack} className="h-10 w-10 rounded-full bg-neutral-100 flex items-center justify-center">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-neutral-100 dark:bg-neutral-900 flex items-center justify-center">
           <ChevronLeft className="h-5 w-5" />
         </button>
         <h1 className="text-lg font-semibold">Save Route</h1>
         <div className="w-10" />
       </div>
       <div className="px-6">
-        <div className="rounded-3xl overflow-hidden border border-neutral-100 h-48">
+        <div className="rounded-3xl overflow-hidden border border-neutral-100 dark:border-neutral-800 h-48">
           <MapView points={data.points} fit interactive={false} />
         </div>
         <div className="grid grid-cols-3 gap-4 mt-4 py-3 px-2">
@@ -563,33 +558,33 @@ function Save({ data, user, onBack, onSaved }) {
         </div>
         <div className="mt-6 space-y-5">
           <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Route name</label>
+            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Route name</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Backroads to Lonavala"
-              className="mt-2 h-12 rounded-xl border-neutral-200 text-base" />
+              className="mt-2 h-12 rounded-xl border-neutral-200 dark:border-neutral-800 text-base" />
           </div>
           <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Description</label>
+            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Description</label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What makes this route special?"
-              className="mt-2 rounded-xl border-neutral-200 min-h-[80px]" />
+              className="mt-2 rounded-xl border-neutral-200 dark:border-neutral-800 min-h-[80px]" />
           </div>
           <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Route type</label>
+            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Route type</label>
             <div className="flex flex-wrap gap-2 mt-2">
               {ROUTE_TYPES.map((t) => (
                 <button key={t} onClick={() => setRouteType(t)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium border transition ${routeType === t ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'}`}>{t}</button>
+                  className={`px-4 py-2 rounded-full text-sm font-medium border transition ${routeType === t ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'}`}>{t}</button>
               ))}
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Tags</label>
-            <p className="text-[10px] text-neutral-400 mt-0.5">Help fellow travellers find this route</p>
+            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Tags</label>
+            <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">Help fellow travellers find this route</p>
             <div className="flex flex-wrap gap-2 mt-2">
               {TAGS.map((t) => {
                 const active = tags.includes(t);
                 return (
                   <button key={t} onClick={() => toggleTag(t)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${active ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-600 border-neutral-200'}`}>
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${active ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-900 text-neutral-600 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'}`}>
                     {active && <Check className="inline h-3 w-3 mr-1" />} {t}
                   </button>
                 );
@@ -597,15 +592,15 @@ function Save({ data, user, onBack, onSaved }) {
             </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Notes for travellers</label>
+            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Notes for travellers</label>
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What locals should know: watch for potholes at km 3, best time is early morning..."
-              className="mt-2 rounded-xl border-neutral-200 min-h-[80px]" />
+              className="mt-2 rounded-xl border-neutral-200 dark:border-neutral-800 min-h-[80px]" />
           </div>
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-white/80">
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-white/80 dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950/80">
         <div className="max-w-md mx-auto">
-          <Button onClick={save} disabled={saving} className="w-full h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white text-base font-semibold">
+          <Button onClick={save} disabled={saving} className="w-full h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-900 text-base font-semibold">
             {saving ? <Loader2 className="h-5 w-5 animate-spin" /> : <>Save & Share <Sparkles className="h-4 w-4 ml-2" /></>}
           </Button>
         </div>
@@ -618,52 +613,52 @@ function Save({ data, user, onBack, onSaved }) {
 function AISummaryCard({ route, onRefresh, loading }) {
   const ai = route.ai_summary;
   return (
-    <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-white to-blue-50 border border-violet-100 p-5 mt-5">
+    <div className="rounded-3xl bg-gradient-to-br from-violet-50 via-white to-blue-50 dark:from-violet-950/30 dark:via-neutral-900 dark:to-blue-950/30 border border-violet-100 dark:border-violet-900/50 p-5 mt-5">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="h-8 w-8 rounded-xl bg-neutral-900 flex items-center justify-center">
-            <Sparkles className="h-4 w-4 text-white" />
+          <div className="h-8 w-8 rounded-xl bg-neutral-900 dark:bg-white flex items-center justify-center">
+            <Sparkles className="h-4 w-4 text-white dark:text-neutral-900" />
           </div>
           <div>
-            <p className="text-xs font-semibold text-neutral-900">Local's Take</p>
-            {ai?.vibe && <p className="text-[10px] text-neutral-500 lowercase">{ai.vibe}</p>}
+            <p className="text-xs font-semibold text-neutral-900 dark:text-white">Local's Take</p>
+            {ai?.vibe && <p className="text-[10px] text-neutral-500 dark:text-neutral-400 lowercase">{ai.vibe}</p>}
           </div>
         </div>
         {onRefresh && (
-          <button onClick={onRefresh} disabled={loading} className="text-[10px] text-neutral-500 hover:text-neutral-900">
+          <button onClick={onRefresh} disabled={loading} className="text-[10px] text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white">
             {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Regenerate'}
           </button>
         )}
       </div>
       {ai ? (
         <>
-          <p className="text-sm text-neutral-800 leading-relaxed">{ai.summary}</p>
+          <p className="text-sm text-neutral-800 dark:text-neutral-200 leading-relaxed">{ai.summary}</p>
           {ai.best_for && (
-            <p className="text-xs text-neutral-600 mt-2 italic">Best for: {ai.best_for}</p>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-2 italic">Best for: {ai.best_for}</p>
           )}
           <div className="grid grid-cols-2 gap-3 mt-4">
-            <div className="rounded-2xl bg-white border border-neutral-100 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Difficulty</p>
+            <div className="rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Difficulty</p>
               <div className="flex items-center gap-1 mt-1">
                 {[1,2,3,4,5].map(i => (
-                  <div key={i} className={`h-1.5 flex-1 rounded-full ${i <= ai.difficulty ? 'bg-neutral-900' : 'bg-neutral-200'}`} />
+                  <div key={i} className={`h-1.5 flex-1 rounded-full ${i <= ai.difficulty ? 'bg-neutral-900 dark:bg-white' : 'bg-neutral-200 dark:bg-neutral-700'}`} />
                 ))}
               </div>
-              <p className="text-xs text-neutral-700 mt-1.5 font-medium">{['','Very easy','Easy','Moderate','Challenging','Demanding'][ai.difficulty]}</p>
+              <p className="text-xs text-neutral-700 dark:text-neutral-300 mt-1.5 font-medium">{['','Very easy','Easy','Moderate','Challenging','Demanding'][ai.difficulty]}</p>
             </div>
-            <div className="rounded-2xl bg-white border border-neutral-100 p-3">
-              <p className="text-[10px] uppercase tracking-wider text-neutral-500">Fuel estimate</p>
-              <p className="text-xs text-neutral-700 mt-1.5 leading-snug">{ai.fuel_note}</p>
+            <div className="rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Fuel estimate</p>
+              <p className="text-xs text-neutral-700 dark:text-neutral-300 mt-1.5 leading-snug">{ai.fuel_note}</p>
             </div>
           </div>
         </>
       ) : loading ? (
         <div className="space-y-2">
-          <div className="h-3 rounded bg-neutral-200 animate-pulse" />
-          <div className="h-3 rounded bg-neutral-200 animate-pulse w-4/5" />
+          <div className="h-3 rounded bg-neutral-200 dark:bg-neutral-700 animate-pulse" />
+          <div className="h-3 rounded bg-neutral-200 dark:bg-neutral-700 animate-pulse w-4/5" />
         </div>
       ) : (
-        <button onClick={onRefresh} className="text-xs text-neutral-600 flex items-center gap-1">
+        <button onClick={onRefresh} className="text-xs text-neutral-600 dark:text-neutral-400 flex items-center gap-1">
           <Sparkles className="h-3 w-3" /> Generate local take
         </button>
       )}
@@ -702,18 +697,18 @@ function VerifiedPill({ route, user, onChange }) {
   return (
     <button onClick={toggle} disabled={busy}
       className={`w-full rounded-2xl border p-4 flex items-center justify-between transition ${
-        byMe ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-neutral-50 border-neutral-100'
+        byMe ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-neutral-50 dark:bg-neutral-900 border-neutral-100 dark:border-neutral-800'
       }`}>
       <div className="flex items-center gap-3">
-        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${byMe ? 'bg-white/10' : 'bg-neutral-900 text-white'}`}>
+        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${byMe ? 'bg-white/10 dark:bg-neutral-900/10' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'}`}>
           <ShieldCheck className="h-4 w-4" />
         </div>
         <div className="text-left">
           <p className="text-sm font-semibold">{count > 0 ? `Verified by ${count} local${count > 1 ? 's' : ''}` : 'Not verified yet'}</p>
-          <p className={`text-[11px] ${byMe ? 'text-white/70' : 'text-neutral-500'}`}>{byMe ? 'Tap to remove your verification' : 'Confirm this route is accurate'}</p>
+          <p className={`text-[11px] ${byMe ? 'text-white/70 dark:text-neutral-900/70' : 'text-neutral-500 dark:text-neutral-400'}`}>{byMe ? 'Tap to remove your verification' : 'Confirm this route is accurate'}</p>
         </div>
       </div>
-      <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${byMe ? 'bg-white text-neutral-900' : 'bg-neutral-900 text-white'}`}>
+      <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${byMe ? 'bg-white text-neutral-900 dark:bg-neutral-900 dark:text-white' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'}`}>
         {byMe ? 'Verified ✓' : 'Verify'}
       </div>
     </button>
@@ -755,20 +750,20 @@ function CommunityNotes({ routeId, user, points }) {
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Local knowledge · {items.length}</p>
-        <button onClick={() => setShowForm(!showForm)} className="text-xs font-medium text-neutral-900 flex items-center gap-1">
+        <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Local knowledge · {items.length}</p>
+        <button onClick={() => setShowForm(!showForm)} className="text-xs font-medium text-neutral-900 dark:text-white flex items-center gap-1">
           {showForm ? <>Cancel <X className="h-3 w-3" /></> : <>Add note <MapPinned className="h-3 w-3" /></>}
         </button>
       </div>
 
       {showForm && (
-        <div className="rounded-2xl bg-neutral-50 border border-neutral-100 p-3 mb-3">
+        <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-3 mb-3">
           <div className="flex flex-wrap gap-1.5 mb-2">
             {NOTE_CATEGORIES.map(c => {
               const Icon = c.icon;
               return (
                 <button key={c.key} onClick={() => setCategory(c.key)}
-                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border flex items-center gap-1 ${category === c.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'}`}>
+                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border flex items-center gap-1 ${category === c.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'}`}>
                   <Icon className="h-3 w-3" /> {c.label}
                 </button>
               );
@@ -776,8 +771,8 @@ function CommunityNotes({ routeId, user, points }) {
           </div>
           <div className="flex items-center gap-2">
             <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Best tea stall here, avoid after 8 PM..."
-              className="h-10 rounded-xl border-neutral-200 bg-white text-sm" onKeyDown={(e) => e.key === 'Enter' && submit()} />
-            <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+              className="h-10 rounded-xl border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center disabled:opacity-40">
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </button>
           </div>
@@ -812,7 +807,7 @@ function CommunityNotes({ routeId, user, points }) {
           );
         })}
         {items.length === 0 && !showForm && (
-          <p className="text-xs text-neutral-400 text-center py-4">No local tips yet. Be the first to share.</p>
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 text-center py-4">No local tips yet. Be the first to share.</p>
         )}
       </div>
     </div>
@@ -844,23 +839,23 @@ function Conditions({ routeId, user }) {
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Road conditions · {items.length}</p>
-        <button onClick={() => setShowForm(!showForm)} className="text-xs font-medium text-neutral-900 flex items-center gap-1">
+        <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Road conditions · {items.length}</p>
+        <button onClick={() => setShowForm(!showForm)} className="text-xs font-medium text-neutral-900 dark:text-white flex items-center gap-1">
           {showForm ? <>Cancel <X className="h-3 w-3" /></> : <>Report <AlertTriangle className="h-3 w-3" /></>}
         </button>
       </div>
       {showForm && (
-        <div className="rounded-2xl border border-neutral-100 p-3 mb-3">
+        <div className="rounded-2xl border border-neutral-100 dark:border-neutral-800 p-3 mb-3">
           <div className="flex gap-1.5 mb-2 overflow-x-auto">
             {CONDITION_TYPES.map(c => (
               <button key={c.key} onClick={() => setType(c.key)}
-                className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-medium border ${type === c.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white border-neutral-200'}`}>{c.label}</button>
+                className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-medium border ${type === c.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300'}`}>{c.label}</button>
             ))}
           </div>
           <div className="flex items-center gap-2">
             <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Describe the issue..."
-              className="h-10 rounded-xl border-neutral-200 bg-neutral-50 text-sm" onKeyDown={(e) => e.key === 'Enter' && submit()} />
-            <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+              className="h-10 rounded-xl border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-sm" onKeyDown={(e) => e.key === 'Enter' && submit()} />
+            <button onClick={submit} disabled={adding || !text.trim()} className="h-10 w-10 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center disabled:opacity-40">
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </button>
           </div>
@@ -884,7 +879,7 @@ function Conditions({ routeId, user }) {
           );
         })}
         {items.length === 0 && !showForm && (
-          <p className="text-xs text-neutral-400 text-center py-4">No road alerts yet.</p>
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 text-center py-4">No road alerts yet.</p>
         )}
       </div>
     </div>
@@ -911,23 +906,23 @@ function Comments({ routeId, user }) {
   };
   return (
     <div className="mt-6">
-      <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-3">Comments · {items.length}</p>
+      <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">Comments · {items.length}</p>
       <div className="space-y-3">
         {items.map(c => (
-          <div key={c.id} className="rounded-2xl bg-neutral-50 border border-neutral-100 p-3">
+          <div key={c.id} className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold">{c.author}</p>
-              <p className="text-[10px] text-neutral-400">{new Date(c.created_at).toLocaleDateString()}</p>
+              <p className="text-[10px] text-neutral-400 dark:text-neutral-500">{new Date(c.created_at).toLocaleDateString()}</p>
             </div>
-            <p className="text-sm text-neutral-800 mt-1">{c.text}</p>
+            <p className="text-sm text-neutral-800 dark:text-neutral-200 mt-1">{c.text}</p>
           </div>
         ))}
-        {items.length === 0 && <p className="text-xs text-neutral-400 text-center py-4">No comments yet.</p>}
+        {items.length === 0 && <p className="text-xs text-neutral-400 dark:text-neutral-500 text-center py-4">No comments yet.</p>}
       </div>
       <div className="flex items-center gap-2 mt-3">
         <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment..."
-          className="h-11 rounded-2xl border-neutral-200 bg-neutral-50" onKeyDown={(e) => e.key === 'Enter' && send()} />
-        <button onClick={send} disabled={sending || !text.trim()} className="h-11 w-11 rounded-full bg-neutral-900 text-white flex items-center justify-center disabled:opacity-40">
+          className="h-11 rounded-2xl border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900" onKeyDown={(e) => e.key === 'Enter' && send()} />
+        <button onClick={send} disabled={sending || !text.trim()} className="h-11 w-11 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center disabled:opacity-40">
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
@@ -952,23 +947,23 @@ function RatingRow({ routeId, user, current }) {
     toast.success(`You rated ${stars} ★`);
   };
   return (
-    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 border border-neutral-100 p-4 mt-3">
+    <div className="flex items-center justify-between rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-4 mt-3">
       <div>
-        <p className="text-xs text-neutral-500">Your rating</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">Your rating</p>
         <div className="flex items-center gap-0.5 mt-1">
           {[1,2,3,4,5].map(i => (
             <button key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(0)} onClick={() => rate(i)} className="p-0.5">
-              <Star className={`h-5 w-5 ${(hover || my) >= i ? 'fill-amber-400 text-amber-400' : 'text-neutral-300'}`} />
+              <Star className={`h-5 w-5 ${(hover || my) >= i ? 'fill-amber-400 text-amber-400' : 'text-neutral-300 dark:text-neutral-700'}`} />
             </button>
           ))}
         </div>
       </div>
       <div className="text-right">
-        <p className="text-xs text-neutral-500">Community</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">Community</p>
         <p className="text-lg font-semibold flex items-center gap-1 justify-end">
           <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
           {avg > 0 ? avg.toFixed(1) : '–'}
-          <span className="text-xs text-neutral-500 font-normal">({count})</span>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400 font-normal">({count})</span>
         </p>
       </div>
     </div>
@@ -1008,40 +1003,40 @@ function Detail({ routeId, onBack, onShare, user }) {
     const updated = await res.json();
     setRoute((r) => ({ ...r, likes: updated.likes }));
   };
-  if (loading) return <div className="min-h-screen bg-white flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-neutral-400" /></div>;
+  if (loading) return <div className="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-neutral-400 dark:text-neutral-500" /></div>;
   if (!route || route.error) return (
-    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8">
-      <p className="text-sm text-neutral-500">Route not found</p>
+    <div className="min-h-screen bg-white dark:bg-neutral-950 flex flex-col items-center justify-center p-8">
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">Route not found</p>
       <Button variant="ghost" onClick={onBack} className="mt-4">Go back</Button>
     </div>
   );
   const noteMarkers = notes.filter(n => n.lat != null && n.lng != null);
   return (
-    <div className="min-h-screen bg-white pb-32">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-32">
       <div className="absolute top-6 left-6 z-[500]">
-        <button onClick={onBack} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-white dark:bg-neutral-900 shadow-lg flex items-center justify-center">
           <ChevronLeft className="h-5 w-5" />
         </button>
       </div>
       <div className="absolute top-6 right-6 z-[500]">
-        <button onClick={toggleLike} className="h-10 w-10 rounded-full bg-white shadow-lg flex items-center justify-center">
+        <button onClick={toggleLike} className="h-10 w-10 rounded-full bg-white dark:bg-neutral-900 shadow-lg flex items-center justify-center">
           <Heart className={`h-5 w-5 ${liked ? 'fill-red-500 text-red-500' : ''}`} />
         </button>
       </div>
-      <div className="h-[42vh] relative bg-neutral-100">
+      <div className="h-[42vh] relative bg-neutral-100 dark:bg-neutral-900">
         <MapView points={route.points} fit interactive noteMarkers={noteMarkers} />
       </div>
-      <div className="px-6 -mt-6 relative bg-white rounded-t-3xl shadow-xl">
+      <div className="px-6 -mt-6 relative bg-white dark:bg-neutral-950 rounded-t-3xl shadow-xl">
         <div className="pt-6">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-2xl font-semibold tracking-tight">{route.name}</h1>
-              <p className="text-sm text-neutral-500 mt-1">by {route.creator_name}</p>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">by {route.creator_name}</p>
             </div>
             <Badge variant="secondary" className="rounded-full">{route.route_type}</Badge>
           </div>
-          {route.description && <p className="text-sm text-neutral-700 mt-4 leading-relaxed">{route.description}</p>}
-          <div className="grid grid-cols-4 gap-3 mt-6 py-4 border-y border-neutral-100">
+          {route.description && <p className="text-sm text-neutral-700 dark:text-neutral-300 mt-4 leading-relaxed">{route.description}</p>}
+          <div className="grid grid-cols-4 gap-3 mt-6 py-4 border-y border-neutral-100 dark:border-neutral-800">
             <MiniStat icon={<RouteIcon className="h-4 w-4" />} label="Distance" value={formatDistance(route.distance_km || 0)} />
             <MiniStat icon={<Clock className="h-4 w-4" />} label="Duration" value={formatDuration(route.duration_sec || 0)} />
             <MiniStat icon={<Gauge className="h-4 w-4" />} label="Avg" value={`${(route.avg_speed_kmh || 0).toFixed(0)} km/h`} />
@@ -1054,17 +1049,17 @@ function Detail({ routeId, onBack, onShare, user }) {
           <RatingRow routeId={route.id} user={user} current={route} />
           {route.tags?.length > 0 && (
             <div className="mt-5">
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">Tags</p>
+              <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-2">Tags</p>
               <div className="flex flex-wrap gap-2">
                 {route.tags.map((t) => (
-                  <span key={t} className="px-3 py-1.5 rounded-full bg-neutral-100 text-neutral-800 text-xs font-medium">{t}</span>
+                  <span key={t} className="px-3 py-1.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 text-xs font-medium">{t}</span>
                 ))}
               </div>
             </div>
           )}
           {route.notes && (
             <div className="mt-5">
-              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">Notes from creator</p>
+              <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-2">Notes from creator</p>
               <div className="rounded-2xl bg-amber-50 border border-amber-100 p-4">
                 <p className="text-sm text-neutral-800 leading-relaxed">{route.notes}</p>
               </div>
@@ -1075,9 +1070,9 @@ function Detail({ routeId, onBack, onShare, user }) {
           <Comments routeId={route.id} user={user} />
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-white/80">
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-white/80 dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950/80">
         <div className="max-w-md mx-auto">
-          <Button onClick={() => onShare(route)} className="w-full h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white text-base font-semibold">
+          <Button onClick={() => onShare(route)} className="w-full h-14 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-900 text-base font-semibold">
             <Share2 className="h-5 w-5 mr-2" /> Share this route
           </Button>
         </div>
@@ -1112,30 +1107,30 @@ function Explore({ onBack, onOpen }) {
   );
 
   return (
-    <div className="min-h-screen bg-white pb-28">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
       <div className="px-6 pt-14 pb-4">
         <h1 className="text-2xl font-semibold tracking-tight">Explore</h1>
-        <p className="text-xs text-neutral-500 mt-1">Discover routes curated by locals</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Discover routes curated by locals</p>
       </div>
       <div className="px-6">
         <div className="relative">
-          <Search className="h-4 w-4 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <Search className="h-4 w-4 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search routes..."
-            className="pl-11 h-12 rounded-2xl border-neutral-200 bg-neutral-50" />
+            className="pl-11 h-12 rounded-2xl border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900" />
         </div>
         <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-1">
           {EXPLORE_CATEGORIES.map(t => (
             <button key={t.key} onClick={() => setCat(t.key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1 ${cat === t.key ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200'}`}>
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1 ${cat === t.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'}`}>
               <t.icon className="h-3 w-3" /> {t.label}
             </button>
           ))}
         </div>
       </div>
       <div className="px-6 mt-5 space-y-3">
-        {routes === null && [1,2,3].map(i => <div key={i} className="rounded-3xl h-56 bg-neutral-100 animate-pulse" />)}
+        {routes === null && [1,2,3].map(i => <div key={i} className="rounded-3xl h-56 bg-neutral-100 dark:bg-neutral-900 animate-pulse" />)}
         {routes !== null && filtered.length === 0 && (
-          <div className="text-center py-16 text-sm text-neutral-500">No routes in this category yet.</div>
+          <div className="text-center py-16 text-sm text-neutral-500 dark:text-neutral-400">No routes in this category yet.</div>
         )}
         {filtered.map(r => <RouteCard key={r.id} route={r} onOpen={() => onOpen(r.id)} />)}
       </div>
@@ -1155,25 +1150,68 @@ function Library({ user, onOpen }) {
     !q || r.name.toLowerCase().includes(q.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(q.toLowerCase()))
   );
   return (
-    <div className="min-h-screen bg-white pb-28">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
       <div className="px-6 pt-14 pb-4">
         <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-        <p className="text-xs text-neutral-500 mt-1">Routes you’ve recorded</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Routes you’ve recorded</p>
       </div>
       <div className="px-6">
         <div className="relative">
-          <Search className="h-4 w-4 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <Search className="h-4 w-4 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your library..."
-            className="pl-11 h-12 rounded-2xl border-neutral-200 bg-neutral-50" />
+            className="pl-11 h-12 rounded-2xl border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900" />
         </div>
       </div>
       <div className="px-6 mt-5 space-y-3">
-        {routes === null && [1,2,3].map(i => <div key={i} className="rounded-3xl h-56 bg-neutral-100 animate-pulse" />)}
+        {routes === null && [1,2,3].map(i => <div key={i} className="rounded-3xl h-56 bg-neutral-100 dark:bg-neutral-900 animate-pulse" />)}
         {routes !== null && filtered.length === 0 && (
-          <div className="text-center py-16 text-sm text-neutral-500">No saved routes yet.</div>
+          <div className="text-center py-16 text-sm text-neutral-500 dark:text-neutral-400">No saved routes yet.</div>
         )}
         {filtered.map(r => <RouteCard key={r.id} route={r} onOpen={() => onOpen(r.id)} />)}
       </div>
+    </div>
+  );
+}
+
+// ============= SETTINGS =============
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const options = [
+    { key: 'light', label: 'Light', icon: Sun },
+    { key: 'dark', label: 'Dark', icon: Moon },
+    { key: 'system', label: 'System', icon: Monitor },
+  ];
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {options.map((opt) => {
+        const Icon = opt.icon;
+        const active = mounted && theme === opt.key;
+        return (
+          <button key={opt.key} onClick={() => setTheme(opt.key)}
+            className={`flex flex-col items-center justify-center gap-1.5 rounded-2xl border py-3 text-xs font-medium transition ${
+              active ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white'
+                     : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'
+            }`}>
+            <Icon className="h-4 w-4" />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SettingsSection() {
+  return (
+    <div className="mt-4 rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <Settings className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
+        <p className="text-xs font-semibold text-neutral-900 dark:text-white uppercase tracking-wider">Settings</p>
+      </div>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Appearance</p>
+      <ThemeToggle />
     </div>
   );
 }
@@ -1194,39 +1232,40 @@ function Profile({ user, updateName }) {
     if (name.trim()) { updateName(name.trim()); setEditing(false); toast.success('Profile updated'); }
   };
   return (
-    <div className="min-h-screen bg-white pb-28">
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
       <div className="px-6 pt-14 pb-4">
         <h1 className="text-2xl font-semibold tracking-tight">Profile</h1>
       </div>
       <div className="px-6">
-        <div className="rounded-3xl bg-neutral-50 border border-neutral-100 p-6 flex items-center gap-4">
-          <div className="h-16 w-16 rounded-2xl bg-neutral-900 flex items-center justify-center text-white text-2xl font-semibold">
+        <div className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-6 flex items-center gap-4">
+          <div className="h-16 w-16 rounded-2xl bg-neutral-900 dark:bg-white flex items-center justify-center text-white dark:text-neutral-900 text-2xl font-semibold">
             {user?.name?.[0]?.toUpperCase() || 'R'}
           </div>
           <div className="flex-1 min-w-0">
             {editing ? (
               <div className="flex items-center gap-2">
-                <Input value={name} onChange={(e) => setName(e.target.value)} className="h-10 rounded-xl border-neutral-200" />
-                <button onClick={save} className="h-10 px-4 rounded-xl bg-neutral-900 text-white text-sm">Save</button>
+                <Input value={name} onChange={(e) => setName(e.target.value)} className="h-10 rounded-xl border-neutral-200 dark:border-neutral-700" />
+                <button onClick={save} className="h-10 px-4 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm">Save</button>
               </div>
             ) : (
               <>
                 <h2 className="text-lg font-semibold truncate">{user?.name}</h2>
-                <button onClick={() => setEditing(true)} className="text-xs text-neutral-500 mt-0.5">Edit name</button>
+                <button onClick={() => setEditing(true)} className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Edit name</button>
               </>
             )}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3 mt-4">
-          <div className="rounded-2xl bg-neutral-50 border border-neutral-100 p-5">
+          <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5">
             <p className="text-2xl font-semibold tabular-nums">{stats.routes}</p>
-            <p className="text-xs text-neutral-500 mt-1">Routes recorded</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Routes recorded</p>
           </div>
-          <div className="rounded-2xl bg-neutral-50 border border-neutral-100 p-5">
+          <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5">
             <p className="text-2xl font-semibold tabular-nums">{stats.verifications}</p>
-            <p className="text-xs text-neutral-500 mt-1">Local verifications</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Local verifications</p>
           </div>
         </div>
+        <SettingsSection />
         <div className="mt-6 rounded-3xl bg-gradient-to-br from-neutral-900 to-neutral-700 text-white p-6">
           <RouteIcon className="h-6 w-6 mb-2" />
           <h3 className="text-lg font-semibold">Navigate Like A Local</h3>
@@ -1235,7 +1274,7 @@ function Profile({ user, updateName }) {
             wisdom of your community.
           </p>
         </div>
-        <div className="mt-6 space-y-1 text-xs text-neutral-400">
+        <div className="mt-6 space-y-1 text-xs text-neutral-400 dark:text-neutral-500">
           <p>User ID • {user?.uid?.slice(0, 8)}…</p>
           <p>Raasta v2.0 • MVP</p>
         </div>
@@ -1286,16 +1325,16 @@ function ShareSheet({ route, mode, setMode }) {
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={expand}
-          className="pointer-events-auto h-12 pl-4 pr-2 rounded-full bg-neutral-900 text-white shadow-2xl shadow-neutral-900/30 flex items-center gap-3 max-w-[92%]"
+          className="pointer-events-auto h-12 pl-4 pr-2 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-2xl shadow-neutral-900/30 flex items-center gap-3 max-w-[92%]"
         >
           <Share2 className="h-4 w-4 shrink-0" />
           <span className="text-sm font-medium truncate">Share Route</span>
-          <span className="text-[10px] text-white/60 truncate hidden xs:inline">{route.name}</span>
+          <span className="text-[10px] text-white/60 dark:text-neutral-900/60 truncate hidden xs:inline">{route.name}</span>
           <span
             role="button"
             aria-label="Dismiss share"
             onClick={(e) => { e.stopPropagation(); close(); }}
-            className="ml-1 h-8 w-8 rounded-full bg-white/10 flex items-center justify-center cursor-pointer"
+            className="ml-1 h-8 w-8 rounded-full bg-white/10 dark:bg-neutral-900/10 flex items-center justify-center cursor-pointer"
           >
             <X className="h-4 w-4" />
           </span>
@@ -1326,15 +1365,15 @@ function ShareSheet({ route, mode, setMode }) {
         }}
         initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-6 pb-10 shadow-2xl"
+        className="relative w-full max-w-md bg-white dark:bg-neutral-950 rounded-t-3xl sm:rounded-3xl p-6 pb-10 shadow-2xl"
       >
-        <div className="h-1.5 w-12 rounded-full bg-neutral-200 mx-auto mb-5 cursor-grab active:cursor-grabbing" />
+        <div className="h-1.5 w-12 rounded-full bg-neutral-200 dark:bg-neutral-700 mx-auto mb-5 cursor-grab active:cursor-grabbing" />
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-lg font-semibold">Share route</h3>
-            <p className="text-[10px] text-neutral-400 mt-0.5">Swipe down to minimize · auto-hides in 5s</p>
+            <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">Swipe down to minimize · auto-hides in 5s</p>
           </div>
-          <button onClick={close} className="h-9 w-9 rounded-full bg-neutral-100 flex items-center justify-center">
+          <button onClick={close} className="h-9 w-9 rounded-full bg-neutral-100 dark:bg-neutral-900 flex items-center justify-center">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1352,11 +1391,11 @@ function ShareSheet({ route, mode, setMode }) {
           </div>
           <p className="text-[11px] text-white/60 mt-4">Navigate Like A Local.</p>
         </div>
-        <div className="rounded-2xl bg-neutral-50 p-4 border border-neutral-100">
-          <p className="text-xs text-neutral-500 uppercase tracking-wider">Public link</p>
+        <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-4 border border-neutral-100 dark:border-neutral-800">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Public link</p>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-sm font-medium truncate flex-1">{shareUrl}</p>
-            <button onClick={copy} className="h-9 w-9 rounded-xl bg-white border border-neutral-200 flex items-center justify-center">
+            <button onClick={copy} className="h-9 w-9 rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 flex items-center justify-center">
               {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
             </button>
           </div>
@@ -1366,11 +1405,11 @@ function ShareSheet({ route, mode, setMode }) {
             className="h-14 rounded-2xl bg-[#25D366] text-white font-semibold flex items-center justify-center gap-2">
             <MessageCircle className="h-5 w-5" /> WhatsApp
           </a>
-          <button onClick={nativeShare} className="h-14 rounded-2xl bg-neutral-900 text-white font-semibold flex items-center justify-center gap-2">
+          <button onClick={nativeShare} className="h-14 rounded-2xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 font-semibold flex items-center justify-center gap-2">
             <Share2 className="h-5 w-5" /> More
           </button>
         </div>
-        <p className="text-[10px] text-neutral-400 text-center mt-4">“Use my Raasta link instead of explaining directions on call.”</p>
+        <p className="text-[10px] text-neutral-400 dark:text-neutral-500 text-center mt-4">“Use my Raasta link instead of explaining directions on call.”</p>
       </motion.div>
     </motion.div>
   );
@@ -1397,7 +1436,7 @@ function App() {
   const showBottomNav = ['home', 'explore', 'my', 'profile'].includes(screen);
 
   return (
-    <div className="max-w-md mx-auto bg-white min-h-screen relative overflow-x-hidden">
+    <div className="max-w-md mx-auto bg-white dark:bg-neutral-950 min-h-screen relative overflow-x-hidden">
       <AnimatePresence mode="wait">
         {screen === 'splash' && <Splash key="splash" onDone={() => setScreen('home')} />}
       </AnimatePresence>

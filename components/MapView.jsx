@@ -66,7 +66,7 @@ export default function MapView({
   const tile = getTileConfig();
 
   if (!mounted) {
-    return <div style={{ height, width: '100%' }} className="bg-neutral-100 animate-pulse" />;
+    return <div style={{ height, width: '100%' }} className="bg-neutral-100 dark:bg-neutral-900 animate-pulse" />;
   }
 
   return (

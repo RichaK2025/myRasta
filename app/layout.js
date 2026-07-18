@@ -1,5 +1,6 @@
 import './globals.css';
 import { Toaster } from 'sonner';
+import { Providers } from './providers';
 
 export const metadata = {
   title: 'Raasta — Real Routes by Real People',
@@ -27,7 +28,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link
           rel="stylesheet"
@@ -37,9 +38,11 @@ export default function RootLayout({ children }) {
         />
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
-      <body className="antialiased bg-white text-neutral-900 min-h-screen">
-        {children}
-        <Toaster position="top-center" richColors />
+      <body className="antialiased bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100 min-h-screen">
+        <Providers>
+          {children}
+          <Toaster position="top-center" richColors />
+        </Providers>
       </body>
     </html>
   );
