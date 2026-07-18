@@ -201,8 +201,20 @@ function Home({ onNav, user }) {
       </div>
 
       <div className="px-6">
-        <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('record')}
+        <motion.a href="/index.html" whileTap={{ scale: 0.98 }} 
           className="w-full rounded-3xl bg-neutral-900 text-white p-6 flex items-center justify-between shadow-xl shadow-neutral-900/10">
+          <div className="text-left">
+            <p className="text-xs text-neutral-400 uppercase tracking-wider">Open landing</p>
+            <h2 className="text-2xl font-semibold mt-1">Overview Page</h2>
+            <p className="text-sm text-neutral-400 mt-1">See the project entry point and app purpose</p>
+          </div>
+          <div className="h-14 w-14 rounded-full bg-white/10 flex items-center justify-center">
+            <Compass className="h-6 w-6" />
+          </div>
+        </motion.a>
+
+        <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('record')}
+          className="w-full rounded-3xl bg-neutral-900 text-white p-6 flex items-center justify-between shadow-xl shadow-neutral-900/10 mt-3">
           <div className="text-left">
             <p className="text-xs text-neutral-400 uppercase tracking-wider">Start new</p>
             <h2 className="text-2xl font-semibold mt-1">Record Route</h2>

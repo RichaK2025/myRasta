@@ -5,7 +5,11 @@ export const metadata = {
   title: 'Raasta — Real Routes by Real People',
   description: 'Record and share the exact routes you travel. Human-curated routes, shared instantly.',
   manifest: '/manifest.json',
-  themeColor: '#0a0a0a',
+  openGraph: {
+    title: 'Raasta',
+    description: 'Discover and share real local routes with the Raasta app.',
+    type: 'website',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',

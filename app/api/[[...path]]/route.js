@@ -19,12 +19,37 @@ function stripId(doc) {
   return rest;
 }
 
+function getPathSegments(request, params) {
+  if (Array.isArray(params?.path)) return params.path;
+  const pathname = request?.nextUrl?.pathname || (request?.url ? new URL(request.url).pathname : '/');
+  return pathname.replace(/^\/api\/?/, '').split('/').filter(Boolean);
+}
+
+async function getDbOrNull() {
+  if (!process.env.MONGO_URL) return null;
+  try {
+    return await getDb();
+  } catch (error) {
+    console.warn('MongoDB unavailable:', error.message);
+    return null;
+  }
+}
+
 export async function GET(request, { params }) {
-  const resolved = await params;
-  const segments = (resolved?.path) || [];
-  const db = await getDb();
+  const segments = getPathSegments(request, params);
+  const db = await getDbOrNull();
 
   try {
+    if (!db) {
+      if (segments.length === 0) {
+        return NextResponse.json({ ok: true, service: 'raasta', database: 'unavailable' });
+      }
+      if (segments[0] === 'routes' && segments.length === 1) {
+        return NextResponse.json([]);
+      }
+      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+    }
+
     if (segments.length === 0) {
       return NextResponse.json({ ok: true, service: 'raasta' });
     }
@@ -114,11 +139,14 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request, { params }) {
-  const resolved = await params;
-  const segments = (resolved?.path) || [];
-  const db = await getDb();
+  const segments = getPathSegments(request, params);
+  const db = await getDbOrNull();
 
   try {
+    if (!db) {
+      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+    }
+
     // POST /api/routes  -> create
     if (segments[0] === 'routes' && segments.length === 1) {
       const body = await request.json();
@@ -331,10 +359,12 @@ export async function POST(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
-  const resolved = await params;
-  const segments = (resolved?.path) || [];
-  const db = await getDb();
+  const segments = getPathSegments(request, params);
+  const db = await getDbOrNull();
   try {
+    if (!db) {
+      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+    }
     if (segments[0] === 'routes' && segments[1] && segments.length === 2) {
       await db.collection('routes').deleteOne({ id: segments[1] });
       await db.collection('comments').deleteMany({ route_id: segments[1] });
