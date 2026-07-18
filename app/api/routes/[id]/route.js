@@ -74,3 +74,38 @@ export async function PATCH(request, { params }) {
     return NextResponse.json({ error: 'Failed to update route' }, { status: 500 });
   }
 }
+
+// Delete a route you own. Once this file matches /api/routes/:id, the
+// catch-all's DELETE handler for the same path is unreachable — Next.js
+// resolves to the most specific route file regardless of which HTTP methods
+// it exports, so the delete logic has to live here, not in the catch-all.
+export async function DELETE(request, { params }) {
+  if (!process.env.MONGO_URL) {
+    return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+  }
+
+  try {
+    const db = await getDb();
+    const route = await db.collection('routes').findOne({ id: params.id });
+    if (!route) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    const url = new URL(request.url);
+    const requesterId = resolveUserId(request, url.searchParams.get('user_id'));
+    if (route.user_id !== requesterId) {
+      return NextResponse.json({ error: 'Not authorized to delete this route' }, { status: 403 });
+    }
+
+    await db.collection('routes').deleteOne({ id: params.id });
+    await db.collection('comments').deleteMany({ route_id: params.id });
+    await db.collection('ratings').deleteMany({ route_id: params.id });
+    await db.collection('conditions').deleteMany({ route_id: params.id });
+    await db.collection('route_notes').deleteMany({ route_id: params.id });
+    await db.collection('verifications').deleteMany({ route_id: params.id });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error(`DELETE /api/routes/${params.id} failed:`, error);
+    return NextResponse.json({ error: 'Failed to delete route' }, { status: 500 });
+  }
+}

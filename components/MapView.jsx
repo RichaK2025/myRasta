@@ -15,8 +15,11 @@ L.Icon.Default.mergeOptions({
 function Recenter({ center, zoom }) {
   const map = useMap();
   useEffect(() => {
-    if (center) map.setView(center, zoom ?? map.getZoom(), { animate: true });
-  }, [center, zoom]);
+    // animate: false avoids leaving a pending animation frame that can fire
+    // after the map's panes are torn down (e.g. on fast navigation/unmount),
+    // which throws "Cannot read properties of undefined (reading '_leaflet_pos')".
+    if (center) map.setView(center, zoom ?? map.getZoom(), { animate: false });
+  }, [center, zoom, map]);
   return null;
 }
 
@@ -25,9 +28,24 @@ function FitBounds({ points }) {
   useEffect(() => {
     if (points && points.length > 1) {
       const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng]));
-      map.fitBounds(bounds, { padding: [40, 40] });
+      map.fitBounds(bounds, { padding: [40, 40], animate: false });
     }
-  }, [points]);
+  }, [points, map]);
+  return null;
+}
+
+// Leaflet computes its container size once on init. When MapView sits inside
+// an element that's still animating in (e.g. a framer-motion card fade-in),
+// that initial size can be wrong. Nudge Leaflet to remeasure shortly after
+// mount/prop changes instead of remounting the whole map (remounting raced
+// with in-flight fitBounds/setView animations and crashed Leaflet).
+function AutoInvalidate({ watch }) {
+  const map = useMap();
+  useEffect(() => {
+    const id = window.setTimeout(() => map.invalidateSize(), 80);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, ...watch]);
   return null;
 }
 
@@ -58,15 +76,8 @@ export default function MapView({
   routeSegments = [],
   waypoints = [],
 }) {
-  const [mapKey, setMapKey] = useState(() => Math.random().toString(36).slice(2));
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  useEffect(() => {
-    if (mounted) {
-      const id = window.setTimeout(() => setMapKey(Math.random().toString(36).slice(2)), 80);
-      return () => window.clearTimeout(id);
-    }
-  }, [mounted, points.length, mapStyle, fit]);
 
   const positions = points.map((p) => [p.lat, p.lng]);
   const initialCenter = center || (positions[0] ? positions[0] : [20.5937, 78.9629]);
@@ -81,7 +92,6 @@ export default function MapView({
   return (
     <div style={{ height, width: '100%' }} className="relative leaflet-map-shell">
       <MapContainer
-        key={mapKey}
         center={initialCenter}
         zoom={zoom}
         style={{ height: '100%', width: '100%' }}
@@ -155,6 +165,7 @@ export default function MapView({
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
         {follow && last && <Recenter center={last} zoom={17} />}
         {fit && positions.length > 1 && <FitBounds points={points} />}
+        <AutoInvalidate watch={[points.length, mapStyle, fit]} />
       </MapContainer>
     </div>
   );

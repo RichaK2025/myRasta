@@ -9,7 +9,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export async function POST(request) {
   try {
-    const { idToken } = await request.json();
+    const { idToken, anonUserId } = await request.json();
     if (!idToken) {
       return NextResponse.json({ error: 'Missing Google token' }, { status: 400 });
     }
@@ -36,6 +36,21 @@ export async function POST(request) {
     });
 
     const user = existing || await db.collection('users').findOne({ _id: userDoc.insertedId });
+    const googleUserId = `g_${user.google_id}`;
+
+    // Claim any routes/folders recorded anonymously on this device before the
+    // user signed in, so they don't get orphaned under the old device-local id.
+    if (anonUserId && anonUserId !== googleUserId) {
+      await db.collection('routes').updateMany(
+        { user_id: anonUserId },
+        { $set: { user_id: googleUserId } }
+      );
+      await db.collection('folders').updateMany(
+        { user_id: anonUserId },
+        { $set: { user_id: googleUserId } }
+      );
+    }
+
     const token = jwt.sign({ sub: user.google_id, email: user.email }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '30d' });
 
     const response = NextResponse.json({ ok: true, user: { id: user.google_id, email: user.email, name: user.name, picture: user.picture } });
