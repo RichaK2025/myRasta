@@ -1,4 +1,5 @@
 import './globals.css';
+import Script from 'next/script';
 import { Toaster } from 'sonner';
 import { Providers } from './providers';
 
@@ -41,6 +42,7 @@ export default function RootLayout({ children }) {
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body className="antialiased bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100 min-h-screen">
+        <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
         <Providers>
           {children}
           <Toaster position="top-center" richColors />

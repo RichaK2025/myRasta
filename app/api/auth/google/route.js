@@ -20,8 +20,8 @@ export async function POST(request) {
     });
 
     const payload = ticket.getPayload();
-    if (!payload?.email) {
-      return NextResponse.json({ error: 'Invalid Google token' }, { status: 401 });
+    if (!payload?.email || !payload.email_verified) {
+      return NextResponse.json({ error: 'Invalid or unverified Google account' }, { status: 401 });
     }
 
     const db = await getDb();
@@ -43,6 +43,9 @@ export async function POST(request) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
+      // Without an explicit path, browsers scope the cookie to the request's
+      // own path (/api/auth), so it would never be sent to /api/routes etc.
+      path: '/',
       maxAge: 60 * 60 * 24 * 30,
     });
 

@@ -22,6 +22,8 @@ import Link from 'next/link';
 import { getSpeedZoneColor } from '@/lib/mapProvider';
 import { cacheRoute, listCached } from '@/lib/offlineCache';
 import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDraft, getAccuracyProfile } from '@/lib/preferences';
+import { useAuth } from '@/lib/useAuth';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -64,22 +66,6 @@ const EXPLORE_CATEGORIES = [
   { key: 'Rain Safe', label: 'Rain Safe', icon: Umbrella },
   { key: 'Bike Route', label: 'Bike', icon: Bike },
 ];
-
-function useLocalUser() {
-  const [user, setUser] = useState(null);
-  useEffect(() => {
-    let uid = localStorage.getItem('raasta_uid');
-    let name = localStorage.getItem('raasta_name');
-    if (!uid) { uid = crypto.randomUUID(); localStorage.setItem('raasta_uid', uid); }
-    if (!name) { name = 'Traveller ' + uid.slice(0, 4).toUpperCase(); localStorage.setItem('raasta_name', name); }
-    setUser({ uid, name });
-  }, []);
-  const updateName = (n) => {
-    localStorage.setItem('raasta_name', n);
-    setUser((u) => ({ ...u, name: n }));
-  };
-  return { user, updateName };
-}
 
 function useServiceWorker() {
   useEffect(() => {
@@ -610,15 +596,35 @@ function Save({ data, user, onBack, onSaved }) {
       const res = await fetch('/api/routes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, name: name.trim(), description: description.trim(), route_type: routeType,
-          tags, notes: notes.trim(), creator_name: user?.name || 'Anonymous', user_id: user?.uid, waypoints: data.waypoints || [], route_stats: data.route_stats, tracking_settings: data.tracking_settings }),
+          tags, notes: notes.trim(), creator_name: user?.name || 'Anonymous', user_id: user?.uid, folder_id: data.folder_id || null, waypoints: data.waypoints || [], route_stats: data.route_stats, tracking_settings: data.tracking_settings }),
       });
-      const created = await res.json();
+
+      // A non-2xx response (e.g. 503 when MongoDB is unreachable) still returns
+      // valid JSON — `{ error: '...' }` — so it must be checked explicitly.
+      // Treating it as success is what produced the "/r/undefined" share links.
+      let payload;
+      try {
+        payload = await res.json();
+      } catch {
+        throw new Error(`Server returned an unexpected response (status ${res.status})`);
+      }
+      if (!res.ok || payload?.error) {
+        throw new Error(payload?.error || `Failed to save route (status ${res.status})`);
+      }
+      if (!payload?.id || !payload?.share_code) {
+        throw new Error('Route was saved but the server response was missing an id/share code.');
+      }
+
+      const created = payload;
       cacheRoute(created);
       toast.success('Route saved!');
       fetch(`/api/routes/${created.id}/summarize`, { method: 'POST' }).catch(() => {});
       onSaved(created);
-    } catch { toast.error('Failed to save. Try again.'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      toast.error(err.message || 'Failed to save. Try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1356,7 +1362,7 @@ function SettingsSection() {
 }
 
 // ============= PROFILE =============
-function Profile({ user, updateName }) {
+function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
   const [name, setName] = useState('');
   const [editing, setEditing] = useState(false);
   const [stats, setStats] = useState({ routes: 0, verifications: 0 });
@@ -1377,11 +1383,15 @@ function Profile({ user, updateName }) {
       </div>
       <div className="px-6">
         <div className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-6 flex items-center gap-4">
-          <div className="h-16 w-16 rounded-2xl bg-neutral-900 dark:bg-white flex items-center justify-center text-white dark:text-neutral-900 text-2xl font-semibold">
-            {user?.name?.[0]?.toUpperCase() || 'R'}
-          </div>
+          {googleUser?.picture ? (
+            <img src={googleUser.picture} alt="" className="h-16 w-16 rounded-2xl object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="h-16 w-16 rounded-2xl bg-neutral-900 dark:bg-white flex items-center justify-center text-white dark:text-neutral-900 text-2xl font-semibold">
+              {user?.name?.[0]?.toUpperCase() || 'R'}
+            </div>
+          )}
           <div className="flex-1 min-w-0">
-            {editing ? (
+            {editing && !googleUser ? (
               <div className="flex items-center gap-2">
                 <Input value={name} onChange={(e) => setName(e.target.value)} className="h-10 rounded-xl border-neutral-200 dark:border-neutral-700" />
                 <button onClick={save} className="h-10 px-4 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm">Save</button>
@@ -1389,11 +1399,38 @@ function Profile({ user, updateName }) {
             ) : (
               <>
                 <h2 className="text-lg font-semibold truncate">{user?.name}</h2>
-                <button onClick={() => setEditing(true)} className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Edit name</button>
+                {googleUser ? (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">{googleUser.email}</p>
+                ) : (
+                  <button onClick={() => setEditing(true)} className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Edit name</button>
+                )}
               </>
             )}
           </div>
         </div>
+
+        <div className="mt-3 rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4 flex items-center justify-between gap-3">
+          {googleUser ? (
+            <>
+              <div>
+                <p className="text-sm font-medium">Signed in with Google</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Your routes are synced to this account.</p>
+              </div>
+              <button onClick={() => signOut()} className="text-xs font-medium px-3 py-2 rounded-full border border-neutral-200 dark:border-neutral-700 shrink-0">
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <div>
+                <p className="text-sm font-medium">Not signed in</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Sign in with Google to sync routes across devices.</p>
+              </div>
+              <GoogleSignInButton onSignedIn={signInWithGoogle} />
+            </>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-3 mt-4">
           <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5">
             <p className="text-2xl font-semibold tabular-nums">{stats.routes}</p>
@@ -1425,6 +1462,9 @@ function Profile({ user, updateName }) {
 // ============= SHARE SHEET (three states: open | mini | null) =============
 function ShareSheet({ route, mode, setMode }) {
   const [copied, setCopied] = useState(false);
+  // Never build a link from a route that hasn't actually been persisted —
+  // this is what previously produced ".../r/undefined" links.
+  if (!route?.share_code) return null;
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/r/${route.share_code}` : '';
   const waText = `${route.name} — shared on Raasta.\n\n🗺️ Navigate Like A Local. Use my Raasta link instead of explaining directions on call:\n${shareUrl}`;
 
@@ -1561,7 +1601,7 @@ function App() {
   const [recordedData, setRecordedData] = useState(null);
   const [shareRoute, setShareRoute] = useState(null);
   const [shareMode, setShareMode] = useState(null); // 'open' | 'mini' | null
-  const { user, updateName } = useLocalUser();
+  const { user, googleUser, signInWithGoogle, signOut, updateName } = useAuth();
   useServiceWorker();
 
   const openShare = (r) => { setShareRoute(r); setShareMode('open'); };
@@ -1591,7 +1631,10 @@ function App() {
       )}
       {screen === 'my' && <Library user={user} onOpen={(id) => goto('detail', id)} />}
       {screen === 'explore' && <Explore onOpen={(id) => goto('detail', id)} />}
-      {screen === 'profile' && <Profile user={user} updateName={updateName} />}
+      {screen === 'profile' && (
+        <Profile user={user} googleUser={googleUser} updateName={updateName}
+          signInWithGoogle={signInWithGoogle} signOut={signOut} />
+      )}
       {screen === 'detail' && detailId && (
         <Detail routeId={detailId} user={user} onBack={() => setScreen('home')} onShare={openShare} />
       )}
