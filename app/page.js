@@ -25,6 +25,7 @@ import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDr
 import { useAuth } from '@/lib/useAuth';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { fetchJson } from '@/lib/utils';
+import { SILENT_AUDIO_SRC } from '@/lib/silentAudio';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
@@ -339,6 +340,9 @@ function Record({ onBack, onDone }) {
   const watchIdRef = useRef(null);
   const startTimeRef = useRef(null);
   const timerRef = useRef(null);
+  const wakeLockRef = useRef(null);
+  const hiddenAtRef = useRef(null);
+  const keepAliveAudioRef = useRef(null);
   const distanceKm = useMemo(() => totalDistance(points), [points]);
   const routeStats = useMemo(() => ({
     distance_km: distanceKm,
@@ -363,15 +367,85 @@ function Record({ onBack, onDone }) {
   useEffect(() => () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    releaseWakeLock();
+    stopKeepAliveAudio();
   }, []);
 
   useEffect(() => {
     saveRouteDraft({ points, elapsed, currentSpeed, maxSpeed, waypoints, status });
   }, [points, elapsed, currentSpeed, maxSpeed, waypoints, status]);
 
+  // The Wake Lock API spec releases the lock automatically the moment the
+  // page is hidden, so it only prevents the *screen from auto-locking due
+  // to inactivity* while the tab is visible — it does not survive the user
+  // actually switching apps. Re-request it every time the tab regains
+  // visibility while still recording.
+  const requestWakeLock = async () => {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request('screen');
+    } catch {
+      // Refused (low battery, permissions, etc.) — recording still works,
+      // the phone just might sleep and pause GPS updates sooner.
+    }
+  };
+  const releaseWakeLock = () => {
+    wakeLockRef.current?.release().catch(() => {});
+    wakeLockRef.current = null;
+  };
+
+  const startKeepAliveAudio = () => {
+    if (!keepAliveAudioRef.current) {
+      const audio = new Audio(SILENT_AUDIO_SRC);
+      audio.loop = true;
+      audio.volume = 0.01; // near-silent, not fully 0 — some browsers only
+      // exempt tabs from suspension when audio is actually audible.
+      audio.setAttribute('playsinline', '');
+      keepAliveAudioRef.current = audio;
+    }
+    keepAliveAudioRef.current.play().catch(() => {
+      // Autoplay can be refused outside a user gesture — startRecording is
+      // always triggered by a tap, so this should succeed in practice.
+    });
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'Raasta — recording your route' });
+      navigator.mediaSession.playbackState = 'playing';
+    }
+  };
+  const stopKeepAliveAudio = () => {
+    keepAliveAudioRef.current?.pause();
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'none';
+  };
+
+  // Detects backgrounding (tab hidden), and on return: re-acquires the wake
+  // lock (auto-released while hidden) and tells the user if tracking was
+  // likely interrupted for long enough to matter, instead of silently
+  // producing a route with an unexplained gap.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        wakeLockRef.current = null; // already released by the browser
+        if (status === 'recording') hiddenAtRef.current = Date.now();
+      } else {
+        if (hiddenAtRef.current != null) {
+          const hiddenForSec = Math.round((Date.now() - hiddenAtRef.current) / 1000);
+          hiddenAtRef.current = null;
+          if (status === 'recording' && hiddenForSec >= 5) {
+            toast.warning(`Tracking may have paused for ~${hiddenForSec}s while backgrounded.`);
+          }
+        }
+        if (status === 'recording') requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [status]);
+
   const startRecording = () => {
     if (!navigator.geolocation) { setError('Geolocation not supported.'); return; }
     setError(null); setStatus('recording');
+    requestWakeLock();
+    startKeepAliveAudio();
     startTimeRef.current = Date.now() - elapsed * 1000;
     timerRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
@@ -412,6 +486,8 @@ function Record({ onBack, onDone }) {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     watchIdRef.current = null;
     if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null;
+    releaseWakeLock();
+    stopKeepAliveAudio();
   };
 
   const addWaypoint = () => {
@@ -426,6 +502,8 @@ function Record({ onBack, onDone }) {
   const stopRecording = () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    releaseWakeLock();
+    stopKeepAliveAudio();
     if (points.length < 2 || distanceKm < 0.01) { toast.error('Not enough movement recorded.'); return; }
     clearRouteDraft();
     onDone({
