@@ -26,8 +26,14 @@ import { useAuth } from '@/lib/useAuth';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { fetchJson } from '@/lib/utils';
 import { SILENT_AUDIO_SRC } from '@/lib/silentAudio';
+import { fetchRoutedPath } from '@/lib/routing';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
+
+// If resuming a paused recording lands more than this far from where it was
+// paused, bridge the gap with an actual routed road path instead of leaving
+// the map to draw a straight line across it.
+const RESUME_GAP_FILL_METERS = 100;
 
 const TAGS = [
   'Fastest', 'Scenic', 'Family Friendly', 'Women Safe', 'Bike Route',
@@ -343,6 +349,11 @@ function Record({ onBack, onDone }) {
   const wakeLockRef = useRef(null);
   const hiddenAtRef = useRef(null);
   const keepAliveAudioRef = useRef(null);
+  // Set right before a resume's watchPosition restarts, to the last point
+  // recorded before the pause. The first GPS fix that comes back is checked
+  // against it once, then cleared, so we only ever try to bridge the gap
+  // immediately after a resume — not on every subsequent point.
+  const resumeAnchorRef = useRef(null);
   const distanceKm = useMemo(() => totalDistance(points), [points]);
   const routeStats = useMemo(() => ({
     distance_km: distanceKm,
@@ -450,11 +461,35 @@ function Record({ onBack, onDone }) {
     timerRef.current = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
     }, 500);
+    // Only a resume (not the initial start) has prior points — arm the
+    // anchor so the first fix we get back can be checked for a gap.
+    resumeAnchorRef.current = points.length > 0 ? points[points.length - 1] : null;
     const profile = getAccuracyProfile(settings.accuracy);
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, timestamp: pos.timestamp,
           speed: pos.coords.speed ?? 0, altitude: pos.coords.altitude ?? null, accuracy: pos.coords.accuracy };
+
+        if (resumeAnchorRef.current) {
+          const anchor = resumeAnchorRef.current;
+          resumeAnchorRef.current = null; // only ever try this once per resume
+          const gapMeters = haversine(anchor, p) * 1000;
+          if (gapMeters > RESUME_GAP_FILL_METERS) {
+            fetchRoutedPath(anchor, p).then((routedPoints) => {
+              // Spread real elapsed time evenly across the inserted points so
+              // duration/speed math downstream never sees a null/zero gap.
+              const withTimestamps = (routedPoints || []).map((rp, i) => ({
+                ...rp,
+                timestamp: anchor.timestamp + ((p.timestamp - anchor.timestamp) * (i + 1)) / (routedPoints.length + 1),
+              }));
+              setPoints((prev) => [...prev, ...withTimestamps, p]);
+            });
+            const spd = (pos.coords.speed ?? 0) * 3.6;
+            setCurrentSpeed(spd); setMaxSpeed((m) => Math.max(m, spd));
+            return;
+          }
+        }
+
         setPoints((prev) => {
           if (prev.length === 0) return [p];
           const last = prev[prev.length - 1];
