@@ -10,12 +10,13 @@ import {
   Bookmark, Check, X, Loader2, Star, AlertTriangle, TrendingUp, Flame, WifiOff, Send,
   Zap, Info, CloudRain, Construction, ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield,
   Camera, Mountain, Church, Baby, Bike, Truck, User, Home as HomeIcon, Library as LibraryIcon,
-  MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Moon, Monitor, Settings, Umbrella
+  MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Moon, Monitor, Settings, Umbrella, Pencil
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { totalDistance, haversine, formatDuration, formatDistance } from '@/lib/geo';
 import Link from 'next/link';
@@ -27,13 +28,28 @@ import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { fetchJson } from '@/lib/utils';
 import { SILENT_AUDIO_SRC } from '@/lib/silentAudio';
 import { fetchRoutedPath } from '@/lib/routing';
+import { RouteCard } from '@/components/RouteCard';
+import { SocialProofStrip } from '@/components/SocialProofStrip';
+import { FollowButton } from '@/components/FollowButton';
+import { ALERT_TYPES } from '@/lib/alertTypes';
+import { VERIFY_AXIS_LABELS } from '@/lib/verification';
+import { AlertsSection } from '@/components/AlertsSection';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
 
-// If resuming a paused recording lands more than this far from where it was
-// paused, bridge the gap with an actual routed road path instead of leaving
-// the map to draw a straight line across it.
-const RESUME_GAP_FILL_METERS = 100;
+// If a paused recording drifts more than this far from where it was paused
+// (found either by low-frequency polling while paused, or at the first GPS
+// fix after tapping Resume), it's treated as "significant" — the user is
+// asked whether to reconstruct the gap via the routing engine rather than
+// silently leaving a straight line across it.
+const SIGNIFICANT_MOVEMENT_METERS = 100;
+// How often to check location while paused. A single low-accuracy fix, not a
+// continuous watch, to keep this battery-cheap.
+const PAUSE_POLL_INTERVAL_MS = 30000;
+// Displacement between two consecutive low-frequency pause polls that reads
+// as sustained travel (vs. GPS drift while stationary) — triggers the
+// "resume recording?" nudge.
+const AUTO_RESUME_NUDGE_METERS = 40;
 
 const TAGS = [
   'Fastest', 'Scenic', 'Family Friendly', 'Women Safe', 'Bike Route',
@@ -226,6 +242,15 @@ function Home({ onNav, user }) {
           </motion.button>
         </div>
 
+        <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('plan')}
+          className="w-full mt-3 rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 flex items-center justify-between text-left">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Plan a Trip</p>
+            <p className="text-sm font-semibold mt-1">Get route recommendations for a destination</p>
+          </div>
+          <Search className="h-5 w-5 text-neutral-400" />
+        </motion.button>
+
         <div className="mt-3 rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 bg-neutral-50 dark:bg-neutral-900">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -234,6 +259,10 @@ function Home({ onNav, user }) {
             </div>
             <Link href="/community" className="text-sm font-medium text-neutral-900 dark:text-white">Open feed</Link>
           </div>
+        </div>
+
+        <div className="mt-4">
+          <SocialProofStrip />
         </div>
 
         {trending.length > 0 && (
@@ -280,58 +309,6 @@ function Home({ onNav, user }) {
 }
 
 // ============= ROUTE CARD =============
-function RouteCard({ route, onOpen }) {
-  return (
-    <motion.div whileTap={{ scale: 0.98 }} onClick={onOpen}
-      className="rounded-3xl border border-neutral-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-sm cursor-pointer">
-      <div className="h-36 bg-neutral-100 dark:bg-neutral-800 relative">
-        {route.points?.length > 1 ? (
-          <MapView points={route.points} fit interactive={false} showEnds height="100%" />
-        ) : (
-          <div className="h-full flex items-center justify-center text-neutral-300 dark:text-neutral-600">
-            <MapPin className="h-8 w-8" />
-          </div>
-        )}
-        {route.ai_summary?.vibe && (
-          <div className="absolute top-2 left-2 px-2.5 py-1 rounded-full bg-white/95 backdrop-blur text-[10px] font-medium flex items-center gap-1 shadow-sm">
-            <Sparkles className="h-3 w-3" /> {route.ai_summary.vibe}
-          </div>
-        )}
-        {route.verified_count > 0 && (
-          <div className="absolute top-2 right-2 px-2.5 py-1 rounded-full bg-neutral-900/90 text-white text-[10px] font-medium flex items-center gap-1 shadow-sm">
-            <ShieldCheck className="h-3 w-3" /> Verified by {route.verified_count}
-          </div>
-        )}
-      </div>
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h4 className="font-semibold truncate">{route.name}</h4>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">by {route.creator_name}</p>
-          </div>
-          {route.route_type && (
-            <Badge variant="secondary" className="rounded-full text-[10px] font-normal shrink-0">{route.route_type}</Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-3 mt-3 text-xs text-neutral-600 dark:text-neutral-400 flex-wrap">
-          <span className="flex items-center gap-1"><RouteIcon className="h-3.5 w-3.5" /> {formatDistance(route.distance_km || 0)}</span>
-          <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {formatDuration(route.duration_sec || 0)}</span>
-          <span className="flex items-center gap-1"><Eye className="h-3.5 w-3.5" /> {route.views || 0}</span>
-          {route.likes > 0 && <span className="flex items-center gap-1"><Heart className="h-3.5 w-3.5" /> {route.likes}</span>}
-          {route.rating_count > 0 && <span className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" /> {route.rating_avg?.toFixed(1)}</span>}
-        </div>
-        {route.tags?.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {route.tags.slice(0, 3).map((t) => (
-              <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300">{t}</span>
-            ))}
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
 // ============= RECORD =============
 function Record({ onBack, onDone }) {
   const [points, setPoints] = useState([]);
@@ -343,6 +320,9 @@ function Record({ onBack, onDone }) {
   const [settings, setSettings] = useState(getSettings());
   const [waypoints, setWaypoints] = useState([]);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [showAlertPicker, setShowAlertPicker] = useState(false);
+  const [reportingAlert, setReportingAlert] = useState(false);
   const watchIdRef = useRef(null);
   const startTimeRef = useRef(null);
   const timerRef = useRef(null);
@@ -354,6 +334,23 @@ function Record({ onBack, onDone }) {
   // against it once, then cleared, so we only ever try to bridge the gap
   // immediately after a resume — not on every subsequent point.
   const resumeAnchorRef = useRef(null);
+  // The point recording was paused at, and the low-freq poll interval that
+  // watches for movement while paused (smart pause recovery).
+  const pausedAtRef = useRef(null);
+  const lastPausePollRef = useRef(null);
+  const pauseWatchIntervalRef = useRef(null);
+  const nudgeShownRef = useRef(false);
+  // { from, to, distanceMeters, alreadyAppended } when significant movement
+  // is detected — `alreadyAppended` distinguishes a gap caught live (the new
+  // point is already in `points`) from one caught by the pause-time poll
+  // (the probe point was never recorded).
+  const [recoveryPrompt, setRecoveryPrompt] = useState(null);
+  // The pause-poll interval is only (re-)armed once per pause, so the
+  // "Resume" action inside its auto-nudge toast would otherwise call a
+  // `startRecording` closure frozen at pause-start time. Route through a
+  // ref that's refreshed every render instead, so it always resumes off the
+  // current `points` (e.g. if a recovery was applied mid-pause).
+  const latestStartRecordingRef = useRef(null);
   const distanceKm = useMemo(() => totalDistance(points), [points]);
   const routeStats = useMemo(() => ({
     distance_km: distanceKm,
@@ -372,12 +369,15 @@ function Record({ onBack, onDone }) {
       setMaxSpeed(draft.maxSpeed || 0);
       setWaypoints(draft.waypoints || []);
       setStatus('paused');
+      startPauseMonitoring(draft.points[draft.points.length - 1]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    stopPauseMonitoring();
     releaseWakeLock();
     stopKeepAliveAudio();
   }, []);
@@ -403,6 +403,54 @@ function Record({ onBack, onDone }) {
   const releaseWakeLock = () => {
     wakeLockRef.current?.release().catch(() => {});
     wakeLockRef.current = null;
+  };
+
+  // Smart pause recovery: while paused, take a single low-accuracy fix every
+  // PAUSE_POLL_INTERVAL_MS (not a continuous watch) to check whether the
+  // user forgot to resume and kept moving. Cheap enough to not meaningfully
+  // affect battery, but only reliable while the tab stays foregrounded —
+  // like the wake lock above, background tabs can throttle/suspend timers.
+  const pollWhilePaused = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const p = { lat: pos.coords.latitude, lng: pos.coords.longitude, timestamp: pos.timestamp,
+          speed: pos.coords.speed ?? 0, altitude: pos.coords.altitude ?? null, accuracy: pos.coords.accuracy };
+        const anchor = pausedAtRef.current;
+        if (!anchor) return;
+
+        if (lastPausePollRef.current) {
+          const stepMeters = haversine(lastPausePollRef.current, p) * 1000;
+          if (stepMeters > AUTO_RESUME_NUDGE_METERS && !nudgeShownRef.current) {
+            nudgeShownRef.current = true;
+            toast('You appear to be travelling again. Resume recording?', {
+              action: { label: 'Resume', onClick: () => latestStartRecordingRef.current?.() },
+              duration: 20000,
+            });
+          }
+        }
+        lastPausePollRef.current = p;
+
+        const distanceMeters = haversine(anchor, p) * 1000;
+        setRecoveryPrompt((prev) => prev || (distanceMeters > SIGNIFICANT_MOVEMENT_METERS
+          ? { from: anchor, to: p, distanceMeters, alreadyAppended: false }
+          : prev));
+      },
+      () => {},
+      { enableHighAccuracy: false, maximumAge: PAUSE_POLL_INTERVAL_MS, timeout: 15000 }
+    );
+  };
+  const startPauseMonitoring = (anchorPoint) => {
+    pausedAtRef.current = anchorPoint || null;
+    lastPausePollRef.current = null;
+    nudgeShownRef.current = false;
+    if (pauseWatchIntervalRef.current) clearInterval(pauseWatchIntervalRef.current);
+    pauseWatchIntervalRef.current = setInterval(pollWhilePaused, PAUSE_POLL_INTERVAL_MS);
+  };
+  const stopPauseMonitoring = () => {
+    if (pauseWatchIntervalRef.current) clearInterval(pauseWatchIntervalRef.current);
+    pauseWatchIntervalRef.current = null;
+    pausedAtRef.current = null;
   };
 
   const startKeepAliveAudio = () => {
@@ -455,6 +503,7 @@ function Record({ onBack, onDone }) {
   const startRecording = () => {
     if (!navigator.geolocation) { setError('Geolocation not supported.'); return; }
     setError(null); setStatus('recording');
+    stopPauseMonitoring();
     requestWakeLock();
     startKeepAliveAudio();
     startTimeRef.current = Date.now() - elapsed * 1000;
@@ -474,19 +523,11 @@ function Record({ onBack, onDone }) {
           const anchor = resumeAnchorRef.current;
           resumeAnchorRef.current = null; // only ever try this once per resume
           const gapMeters = haversine(anchor, p) * 1000;
-          if (gapMeters > RESUME_GAP_FILL_METERS) {
-            fetchRoutedPath(anchor, p).then((routedPoints) => {
-              // Spread real elapsed time evenly across the inserted points so
-              // duration/speed math downstream never sees a null/zero gap.
-              const withTimestamps = (routedPoints || []).map((rp, i) => ({
-                ...rp,
-                timestamp: anchor.timestamp + ((p.timestamp - anchor.timestamp) * (i + 1)) / (routedPoints.length + 1),
-              }));
-              setPoints((prev) => [...prev, ...withTimestamps, p]);
-            });
-            const spd = (pos.coords.speed ?? 0) * 3.6;
-            setCurrentSpeed(spd); setMaxSpeed((m) => Math.max(m, spd));
-            return;
+          // Don't silently fix the gap — surface it so the user decides
+          // (Recover route / Ignore movement). The point below is still
+          // appended normally so live tracking never stalls on that choice.
+          if (gapMeters > SIGNIFICANT_MOVEMENT_METERS) {
+            setRecoveryPrompt((prev) => prev || { from: anchor, to: p, distanceMeters: gapMeters, alreadyAppended: true });
           }
         }
 
@@ -515,6 +556,7 @@ function Record({ onBack, onDone }) {
       { enableHighAccuracy: profile.enableHighAccuracy, maximumAge: profile.maximumAge, timeout: profile.timeout }
     );
   };
+  latestStartRecordingRef.current = startRecording;
 
   const pauseRecording = () => {
     setStatus('paused');
@@ -523,7 +565,36 @@ function Record({ onBack, onDone }) {
     if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null;
     releaseWakeLock();
     stopKeepAliveAudio();
+    startPauseMonitoring(points[points.length - 1]);
   };
+
+  const recoverRoute = async () => {
+    if (!recoveryPrompt) return;
+    const { from, to, alreadyAppended } = recoveryPrompt;
+    setRecoveryPrompt(null);
+    const routedPoints = await fetchRoutedPath(from, to);
+    if (!routedPoints || routedPoints.length === 0) {
+      toast.error('Could not reconstruct that section of the route.');
+      if (!alreadyAppended) setPoints((prev) => [...prev, to]);
+      return;
+    }
+    // Spread real elapsed time evenly across the inserted points so
+    // duration/speed math downstream never sees a null/zero gap.
+    const withTimestamps = routedPoints.map((rp, i) => ({
+      ...rp,
+      timestamp: from.timestamp + ((to.timestamp - from.timestamp) * (i + 1)) / (routedPoints.length + 1),
+    }));
+    setPoints((prev) => {
+      if (alreadyAppended) {
+        // `to` is already the last recorded point — splice the estimated
+        // points in just before it rather than after.
+        return [...prev.slice(0, -1), ...withTimestamps, prev[prev.length - 1]];
+      }
+      return [...prev, ...withTimestamps, to];
+    });
+    toast.success('Estimated route section added');
+  };
+  const ignoreMovement = () => setRecoveryPrompt(null);
 
   const addWaypoint = () => {
     if (!points.length) return;
@@ -534,13 +605,36 @@ function Record({ onBack, onDone }) {
     toast.success('Waypoint added');
   };
 
+  const reportAlert = async (typeKey) => {
+    setShowAlertPicker(false);
+    const at = points[points.length - 1];
+    if (!at) { toast.error('Start recording first so we know your location.'); return; }
+    setReportingAlert(true);
+    try {
+      const res = await fetch('/api/alerts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: typeKey, lat: at.lat, lng: at.lng }),
+      });
+      const created = await res.json();
+      if (!res.ok || created?.error) throw new Error(created?.error);
+      setAlerts((prev) => [...prev, created]);
+      toast.success('Reported to the community — thanks!');
+    } catch {
+      toast.error('Could not report right now. Try again.');
+    } finally {
+      setReportingAlert(false);
+    }
+  };
+
   const stopRecording = () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    stopPauseMonitoring();
     releaseWakeLock();
     stopKeepAliveAudio();
     if (points.length < 2 || distanceKm < 0.01) { toast.error('Not enough movement recorded.'); return; }
     clearRouteDraft();
+    setRecoveryPrompt(null);
     onDone({
       points, distance_km: distanceKm, duration_sec: elapsed, max_speed_kmh: maxSpeed,
       avg_speed_kmh: elapsed > 0 ? (distanceKm / (elapsed / 3600)) : 0,
@@ -569,14 +663,46 @@ function Record({ onBack, onDone }) {
   const last = points[points.length - 1];
   const routeSegments = useMemo(() => {
     const segments = [];
-    for (let i = 1; i < points.length; i += 1) {
-      const prev = points[i - 1];
-      const next = points[i];
-      const speedKmh = ((next.speed || 0) * 3.6);
-      segments.push({ points: [prev, next], speedKmh, color: getSpeedZoneColor(speedKmh) });
+    let i = 1;
+    while (i < points.length) {
+      if (points[i].routed) {
+        // Merge the whole consecutive run of routed (estimated) points into
+        // one dashed segment, anchored to the real GPS point on either side,
+        // instead of many tiny 2-point segments.
+        const start = i - 1;
+        let j = i;
+        while (j < points.length && points[j].routed) j += 1;
+        const end = Math.min(j, points.length - 1);
+        segments.push({ points: points.slice(start, end + 1), estimated: true, dashArray: '8 8', color: '#6b7280', weight: 4 });
+        i = end + 1;
+      } else {
+        const prev = points[i - 1];
+        const next = points[i];
+        const speedKmh = ((next.speed || 0) * 3.6);
+        segments.push({ points: [prev, next], speedKmh, color: getSpeedZoneColor(speedKmh) });
+        i += 1;
+      }
     }
     return segments;
   }, [points]);
+  const hasEstimatedSection = points.some((p) => p.routed);
+
+  // Refresh nearby community alerts (e.g. police checking reports) every
+  // couple of minutes while there's a location to check against — cheap
+  // enough not to matter, frequent enough to catch new reports en route.
+  useEffect(() => {
+    if (status === 'idle' || !last) return;
+    const fetchNearby = () => {
+      fetch(`/api/alerts?lat=${last.lat}&lng=${last.lng}&radiusKm=5`)
+        .then((r) => r.json())
+        .then((data) => setAlerts(Array.isArray(data) ? data : []))
+        .catch(() => {});
+    };
+    fetchNearby();
+    const id = setInterval(fetchNearby, 120000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, last?.lat != null && Math.round(last.lat * 200), last?.lng != null && Math.round(last.lng * 200)]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950 flex flex-col">
@@ -590,6 +716,11 @@ function Record({ onBack, onDone }) {
         </div>
         <div className="w-10" />
       </div>
+      {hasEstimatedSection && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-full bg-white dark:bg-neutral-900 shadow-lg text-xs font-medium flex items-center gap-2 text-neutral-600 dark:text-neutral-300">
+          <span className="inline-block w-4 border-t-2 border-dashed border-neutral-400" /> Estimated route section
+        </div>
+      )}
 
       <div className="flex-1 relative min-h-[55vh]">
         {points.length === 0 ? (
@@ -608,7 +739,7 @@ function Record({ onBack, onDone }) {
             )}
           </div>
         ) : (
-          <MapView points={points} follow={status === 'recording'} center={last ? [last.lat, last.lng] : null} zoom={17} mapStyle={settings.mapStyle} routeSegments={routeSegments} waypoints={waypoints} />
+          <MapView points={points} follow={status === 'recording'} center={last ? [last.lat, last.lng] : null} zoom={17} mapStyle={settings.mapStyle} routeSegments={routeSegments} waypoints={waypoints} alerts={alerts} />
         )}
       </div>
 
@@ -633,6 +764,41 @@ function Record({ onBack, onDone }) {
             <button onClick={addWaypoint} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">Add waypoint</button>
             <button onClick={() => { const next = saveSettings({ mapStyle: settings.mapStyle === 'satellite' ? 'standard' : 'satellite' }); setSettings(next); }} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">Map: {settings.mapStyle}</button>
           </div>
+          {status !== 'idle' && (
+            <div className="mb-4">
+              <button onClick={() => setShowAlertPicker(true)} className="w-full rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm flex items-center justify-center gap-1.5">
+                🚨 Report Police Checking
+              </button>
+            </div>
+          )}
+          {showAlertPicker && (
+            <div className="fixed inset-0 z-[600] flex items-end bg-black/40" onClick={() => setShowAlertPicker(false)}>
+              <div className="w-full bg-white dark:bg-neutral-900 rounded-t-3xl p-6 pb-8" onClick={(e) => e.stopPropagation()}>
+                <p className="text-sm font-semibold mb-3">What did you see?</p>
+                <div className="space-y-2">
+                  {ALERT_TYPES.map((t) => (
+                    <button key={t.key} disabled={reportingAlert} onClick={() => reportAlert(t.key)}
+                      className="w-full flex items-center gap-3 rounded-xl border border-neutral-200 dark:border-neutral-700 px-4 py-3 text-sm text-left disabled:opacity-50">
+                      <span className="text-lg">{t.icon}</span> {t.label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowAlertPicker(false)} className="w-full text-center text-xs text-neutral-500 dark:text-neutral-400 mt-3 py-2">Cancel</button>
+              </div>
+            </div>
+          )}
+          {recoveryPrompt && (
+            <div className="mb-4 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 p-4">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-white">It looks like you travelled while paused.</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1">
+                About {formatDistance(recoveryPrompt.distanceMeters / 1000)} of movement was detected. Reconstruct that section using roads, or ignore it?
+              </p>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <button onClick={ignoreMovement} className="h-11 rounded-full border border-neutral-200 dark:border-neutral-700 text-sm font-medium">Ignore movement</button>
+                <button onClick={recoverRoute} className="h-11 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium">Recover route</button>
+              </div>
+            </div>
+          )}
           {status === 'idle' && (
             <div className="space-y-2">
               <motion.button whileTap={{ scale: 0.97 }} onClick={startRecording}
@@ -822,6 +988,70 @@ function Save({ data, user, onBack, onSaved }) {
   );
 }
 
+// ============= ROUTE STORY =============
+// route.story (owner-written) takes priority; falls back to the AI-generated
+// route.ai_summary.story; editing always writes to route.story (an empty
+// save clears the override and re-enables the AI fallback).
+function RouteStory({ route, user, onSaved }) {
+  const isOwner = user?.uid && route.user_id === user.uid;
+  const storyText = route.story || route.ai_summary?.story || '';
+  const isCustom = !!route.story;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(storyText);
+  const [saving, setSaving] = useState(false);
+
+  if (!storyText && !isOwner) return null;
+
+  const save = async (value) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/routes/${route.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid, story: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error);
+      onSaved?.(data.story ?? null);
+      setEditing(false);
+      toast.success(value ? 'Story updated' : 'Reset to AI-generated story');
+    } catch {
+      toast.error('Could not save the story. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-5">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Route Story</p>
+        {isOwner && !editing && (
+          <button onClick={() => { setDraft(storyText); setEditing(true); }} className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-900 dark:hover:text-white">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div>
+          <Textarea value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="My favourite Sunday drive..."
+            className="rounded-xl border-neutral-200 dark:border-neutral-800 min-h-[100px] text-sm" />
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => setEditing(false)} className="flex-1 h-9 rounded-full border border-neutral-200 dark:border-neutral-700 text-xs font-medium">Cancel</button>
+            {isCustom && (
+              <button onClick={() => save('')} disabled={saving} className="flex-1 h-9 rounded-full border border-neutral-200 dark:border-neutral-700 text-xs font-medium">Reset to AI story</button>
+            )}
+            <button onClick={() => save(draft)} disabled={saving} className="flex-1 h-9 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-medium">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mx-auto" /> : 'Save'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed">{storyText}</p>
+      )}
+    </div>
+  );
+}
+
 // ============= AI SUMMARY =============
 function AISummaryCard({ route, onRefresh, loading }) {
   const ai = route.ai_summary;
@@ -864,6 +1094,18 @@ function AISummaryCard({ route, onRefresh, loading }) {
               <p className="text-xs text-neutral-700 dark:text-neutral-300 mt-1.5 leading-snug">{ai.fuel_note}</p>
             </div>
           </div>
+          {ai.why_locals_prefer?.length > 0 && (
+            <div className="mt-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-2">Why locals prefer this route</p>
+              <div className="space-y-1.5">
+                {ai.why_locals_prefer.map((point, i) => (
+                  <p key={i} className="text-xs text-neutral-700 dark:text-neutral-300 flex items-start gap-1.5">
+                    <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" /> {point}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       ) : loading ? (
         <div className="space-y-2">
@@ -880,51 +1122,104 @@ function AISummaryCard({ route, onRefresh, loading }) {
 }
 
 // ============= VERIFIED PILL =============
+const VERIFY_QUESTIONS = [
+  { key: 'road_condition_accurate', label: 'Road condition info is accurate' },
+  { key: 'safety_accurate', label: 'Feels safe to travel' },
+  { key: 'scenic_accurate', label: 'Scenic / worth the view' },
+  { key: 'family_friendly_accurate', label: 'Good for family travel' },
+  { key: 'tags_accurate', label: 'Tags are accurate' },
+];
+
 function VerifiedPill({ route, user, onChange }) {
   const [count, setCount] = useState(route.verified_count || 0);
+  const [confidence, setConfidence] = useState(route.confidence_score ?? null);
+  const [axisScores, setAxisScores] = useState(route.axis_scores ?? null);
   const [byMe, setByMe] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [answers, setAnswers] = useState(() => Object.fromEntries(VERIFY_QUESTIONS.map((q) => [q.key, true])));
 
   useEffect(() => {
     fetch(`/api/routes/${route.id}/verifications`).then(r => r.json()).then((d) => {
       setCount(d.count || 0);
+      setConfidence(d.confidence_score ?? null);
+      setAxisScores(d.axis_scores ?? null);
       setByMe(!!d.users?.find(u => u.user_id === user?.uid));
     });
   }, [route.id, user?.uid]);
 
-  const toggle = async () => {
+  const submit = async (unverify) => {
     if (!user) return; setBusy(true);
     try {
       const res = await fetch(`/api/routes/${route.id}/verify`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.uid, author: user.name, unverify: byMe }),
+        body: JSON.stringify({ user_id: user.uid, author: user.name, unverify, ...answers }),
       });
       const data = await res.json();
       setCount(data.verified_count);
-      setByMe(!byMe);
+      setConfidence(data.confidence_score ?? null);
+      setAxisScores(data.axis_scores ?? null);
+      setByMe(!unverify);
+      setShowForm(false);
       onChange?.(data.verified_count);
-      toast.success(byMe ? 'Verification removed' : 'You verified this route ✓');
+      toast.success(unverify ? 'Verification removed' : 'You verified this route ✓');
     } finally { setBusy(false); }
   };
 
+  const headline = count > 0
+    ? `Verified by ${count} local${count > 1 ? 's' : ''}${confidence != null ? ` · ${confidence}% Local Approval` : ''}`
+    : 'Not verified yet';
+
   return (
-    <button onClick={toggle} disabled={busy}
-      className={`w-full rounded-2xl border p-4 flex items-center justify-between transition ${
-        byMe ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-neutral-50 dark:bg-neutral-900 border-neutral-100 dark:border-neutral-800'
-      }`}>
-      <div className="flex items-center gap-3">
-        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${byMe ? 'bg-white/10 dark:bg-neutral-900/10' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'}`}>
-          <ShieldCheck className="h-4 w-4" />
+    <div>
+      <button onClick={() => (byMe ? submit(true) : setShowForm((s) => !s))} disabled={busy}
+        className={`w-full rounded-2xl border p-4 flex items-center justify-between transition ${
+          byMe ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-neutral-50 dark:bg-neutral-900 border-neutral-100 dark:border-neutral-800'
+        }`}>
+        <div className="flex items-center gap-3">
+          <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${byMe ? 'bg-white/10 dark:bg-neutral-900/10' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'}`}>
+            <ShieldCheck className="h-4 w-4" />
+          </div>
+          <div className="text-left">
+            <p className="text-sm font-semibold">{headline}</p>
+            <p className={`text-[11px] ${byMe ? 'text-white/70 dark:text-neutral-900/70' : 'text-neutral-500 dark:text-neutral-400'}`}>{byMe ? 'Tap to remove your verification' : 'Confirm this route is accurate'}</p>
+          </div>
         </div>
-        <div className="text-left">
-          <p className="text-sm font-semibold">{count > 0 ? `Verified by ${count} local${count > 1 ? 's' : ''}` : 'Not verified yet'}</p>
-          <p className={`text-[11px] ${byMe ? 'text-white/70 dark:text-neutral-900/70' : 'text-neutral-500 dark:text-neutral-400'}`}>{byMe ? 'Tap to remove your verification' : 'Confirm this route is accurate'}</p>
+        <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${byMe ? 'bg-white text-neutral-900 dark:bg-neutral-900 dark:text-white' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'}`}>
+          {byMe ? 'Verified ✓' : 'Verify'}
         </div>
-      </div>
-      <div className={`px-3 py-1.5 rounded-full text-xs font-medium ${byMe ? 'bg-white text-neutral-900 dark:bg-neutral-900 dark:text-white' : 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'}`}>
-        {byMe ? 'Verified ✓' : 'Verify'}
-      </div>
-    </button>
+      </button>
+      {axisScores && (
+        <div className="mt-2 rounded-2xl border border-neutral-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 space-y-2">
+          {Object.entries(VERIFY_AXIS_LABELS).map(([key, label]) => (
+            <div key={key} className="flex items-center gap-2">
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 w-28 shrink-0">{label}</span>
+              <div className="flex-1 h-1.5 rounded-full bg-neutral-100 dark:bg-neutral-800 overflow-hidden">
+                <div className="h-full bg-neutral-900 dark:bg-white rounded-full" style={{ width: `${axisScores[key] ?? 0}%` }} />
+              </div>
+              <span className="text-xs font-medium w-9 text-right">{axisScores[key] ?? 0}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {showForm && !byMe && (
+        <div className="mt-2 rounded-2xl border border-neutral-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 space-y-1.5">
+          {VERIFY_QUESTIONS.map((q) => (
+            <button key={q.key} onClick={() => setAnswers((a) => ({ ...a, [q.key]: !a[q.key] }))}
+              className="w-full flex items-center justify-between px-2 py-2 rounded-xl text-sm">
+              <span className="text-neutral-700 dark:text-neutral-300">{q.label}</span>
+              <span className={`h-5 w-5 rounded-md border flex items-center justify-center ${answers[q.key] ? 'bg-neutral-900 dark:bg-white border-neutral-900 dark:border-white' : 'border-neutral-300 dark:border-neutral-700'}`}>
+                {answers[q.key] && <Check className="h-3.5 w-3.5 text-white dark:text-neutral-900" />}
+              </span>
+            </button>
+          ))}
+          <button onClick={() => submit(false)} disabled={busy}
+            className="w-full mt-1 h-10 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : 'Submit verification'}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1143,6 +1438,27 @@ function Comments({ routeId, user }) {
   );
 }
 
+// ============= NEARBY ROUTES =============
+function NearbyRoutes({ routeId, onOpen }) {
+  const [routes, setRoutes] = useState([]);
+  useEffect(() => {
+    fetchJson(`/api/routes/${routeId}/nearby`).then((d) => setRoutes(d.routes || [])).catch(() => setRoutes([]));
+  }, [routeId]);
+  if (routes.length === 0) return null;
+  return (
+    <div className="mt-6">
+      <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">People also explored</p>
+      <div className="flex gap-3 overflow-x-auto pb-1 -mx-6 px-6">
+        {routes.map((r) => (
+          <div key={r.id} className="w-56 shrink-0">
+            <RouteCard route={r} onOpen={() => onOpen(r.id)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ============= RATING =============
 function RatingRow({ routeId, user, current }) {
   const [avg, setAvg] = useState(current?.rating_avg || 0);
@@ -1184,7 +1500,7 @@ function RatingRow({ routeId, user, current }) {
 }
 
 // ============= DETAIL =============
-function Detail({ routeId, onBack, onShare, user }) {
+function Detail({ routeId, onBack, onShare, onOpenRoute, user }) {
   const [route, setRoute] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liked, setLiked] = useState(false);
@@ -1255,6 +1571,10 @@ function Detail({ routeId, onBack, onShare, user }) {
             <MiniStat icon={<Gauge className="h-4 w-4" />} label="Avg" value={`${(route.avg_speed_kmh || 0).toFixed(0)} km/h`} />
             <MiniStat icon={<Eye className="h-4 w-4" />} label="Views" value={String(route.views || 0)} />
           </div>
+          <div className="mt-4 flex justify-end">
+            <FollowButton routeId={route.id} user={user} />
+          </div>
+          <RouteStory route={route} user={user} onSaved={(story) => setRoute(r => ({ ...r, story }))} />
           <div className="mt-4">
             <VerifiedPill route={route} user={user} onChange={(c) => setRoute(r => ({ ...r, verified_count: c }))} />
           </div>
@@ -1280,7 +1600,9 @@ function Detail({ routeId, onBack, onShare, user }) {
           )}
           <CommunityNotes routeId={route.id} user={user} points={route.points} />
           <Conditions routeId={route.id} user={user} />
+          <AlertsSection lat={route.start?.lat} lng={route.start?.lng} />
           <Comments routeId={route.id} user={user} />
+          <NearbyRoutes routeId={route.id} onOpen={(id) => onOpenRoute?.(id)} />
         </div>
       </div>
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-white/80 dark:from-neutral-950 dark:via-neutral-950 dark:to-neutral-950/80">
@@ -1295,6 +1617,77 @@ function Detail({ routeId, onBack, onShare, user }) {
 }
 
 // ============= EXPLORE =============
+// ============= PLAN A TRIP (Smart Route Recommendations) =============
+// Surfaces existing community-recorded routes near a searched destination,
+// grouped into mode cards — not a live turn-by-turn routing engine. Matches
+// "Google Maps gives directions, Raasta gives recommendations."
+function PlanTrip({ onBack, onOpen }) {
+  const [query, setQuery] = useState('');
+  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [result, setResult] = useState(null);
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setState('loading');
+    try {
+      const res = await fetch(`/api/recommendations?q=${encodeURIComponent(query.trim())}`);
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data?.error);
+      setResult(data);
+      setState('done');
+    } catch (err) {
+      setResult(null);
+      setState('error');
+      toast.error(err.message || 'Could not find recommendations for that destination.');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-10">
+      <div className="px-6 pt-14 pb-4 flex items-center justify-between">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-neutral-100 dark:bg-neutral-900 flex items-center justify-center">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <h1 className="text-lg font-semibold">Plan a Trip</h1>
+        <div className="w-10" />
+      </div>
+
+      <div className="px-6">
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">Where are you headed? We'll show routes locals actually recommend.</p>
+        <div className="flex items-center gap-2 mt-4">
+          <Input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()}
+            placeholder="e.g. Raipur, or a landmark" className="h-12 rounded-xl border-neutral-200 dark:border-neutral-800" />
+          <button onClick={search} disabled={state === 'loading'} className="h-12 w-12 shrink-0 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 flex items-center justify-center disabled:opacity-50">
+            {state === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+          </button>
+        </div>
+
+        {state === 'done' && result && (
+          <div className="mt-6">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-4">Showing routes near {result.destination.label?.split(',')[0] || query}</p>
+            {result.cards.length === 0 && (
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 text-center py-10">No community routes near there yet — be the first to record one.</p>
+            )}
+            <div className="space-y-6">
+              {result.cards.map((card) => (
+                <div key={card.mode}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-semibold">{card.icon} {card.label}</p>
+                    {card.route.verified_count > 0 && (
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">Recommended by {card.route.verified_count} local{card.route.verified_count > 1 ? 's' : ''}</p>
+                    )}
+                  </div>
+                  <RouteCard route={card.route} onOpen={() => onOpen(card.route.id)} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Explore({ onBack, onOpen }) {
   const [routes, setRoutes] = useState(null);
   const [q, setQ] = useState('');
@@ -1574,12 +1967,32 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
 }
 
 // ============= SHARE SHEET (three states: open | mini | null) =============
-function ShareSheet({ route, mode, setMode }) {
+function ShareSheet({ route, user, mode, setMode }) {
   const [copied, setCopied] = useState(false);
+  const [isPublic, setIsPublic] = useState(!!route?.is_public);
+  const [publishing, setPublishing] = useState(false);
+  useEffect(() => { setIsPublic(!!route?.is_public); }, [route?.id]);
   // Never build a link from a route that hasn't actually been persisted —
   // this is what previously produced ".../r/undefined" links.
   if (!route?.share_code) return null;
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/r/${route.share_code}` : '';
+  const togglePublic = async () => {
+    const next = !isPublic;
+    setIsPublic(next); setPublishing(true);
+    try {
+      const res = await fetch(`/api/routes/${route.id}/share`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user?.uid, isPublic: next }),
+      });
+      if (!res.ok) throw new Error('failed');
+      toast.success(next ? 'Published to Community feed' : 'Removed from Community feed');
+    } catch {
+      setIsPublic(!next);
+      toast.error('Could not update. Try again.');
+    } finally {
+      setPublishing(false);
+    }
+  };
   const waText = `${route.name} — shared on Raasta.\n\n🗺️ Navigate Like A Local. Use my Raasta link instead of explaining directions on call:\n${shareUrl}`;
 
   const close = () => setMode(null);
@@ -1693,6 +2106,13 @@ function ShareSheet({ route, mode, setMode }) {
             </button>
           </div>
         </div>
+        <div className="flex items-center justify-between gap-3 mt-4 rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-4 border border-neutral-100 dark:border-neutral-800">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Publish to Community</p>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">Let other Raasta users discover this route</p>
+          </div>
+          <Switch checked={isPublic} disabled={publishing} onCheckedChange={togglePublic} />
+        </div>
         <div className="grid grid-cols-2 gap-3 mt-4">
           <a href={`https://wa.me/?text=${encodeURIComponent(waText)}`} target="_blank" rel="noreferrer"
             className="h-14 rounded-2xl bg-[#25D366] text-white font-semibold flex items-center justify-center gap-2">
@@ -1745,19 +2165,21 @@ function App() {
       )}
       {screen === 'my' && <Library user={user} onOpen={(id) => goto('detail', id)} />}
       {screen === 'explore' && <Explore onOpen={(id) => goto('detail', id)} />}
+      {screen === 'plan' && <PlanTrip onBack={() => setScreen('home')} onOpen={(id) => goto('detail', id)} />}
       {screen === 'profile' && (
         <Profile user={user} googleUser={googleUser} updateName={updateName}
           signInWithGoogle={signInWithGoogle} signOut={signOut} />
       )}
       {screen === 'detail' && detailId && (
-        <Detail routeId={detailId} user={user} onBack={() => setScreen('home')} onShare={openShare} />
+        <Detail routeId={detailId} user={user} onBack={() => setScreen('home')} onShare={openShare}
+          onOpenRoute={(id) => setDetailId(id)} />
       )}
 
       {showBottomNav && <BottomNav active={screen} onNav={goto} />}
 
       <AnimatePresence>
         {shareRoute && shareMode && (
-          <ShareSheet route={shareRoute} mode={shareMode} setMode={setMode} />
+          <ShareSheet route={shareRoute} user={user} mode={shareMode} setMode={setMode} />
         )}
       </AnimatePresence>
     </div>

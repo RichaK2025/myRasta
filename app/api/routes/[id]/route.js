@@ -21,6 +21,7 @@ export async function GET(request, { params }) {
       id: route.id,
       name: route.name,
       description: route.description,
+      route_type: route.route_type || 'General',
       creator_name: route.creator_name,
       user_id: route.user_id,
       folder_id: route.folder_id || null,
@@ -29,13 +30,25 @@ export async function GET(request, { params }) {
       duration_sec: route.duration_sec || 0,
       avg_speed_kmh: route.avg_speed_kmh || 0,
       max_speed_kmh: route.max_speed_kmh || 0,
+      start: route.start || null,
+      end: route.end || null,
+      city: route.city || null,
+      waypoints: route.waypoints || [],
+      route_stats: route.route_stats || null,
       share_code: route.share_code,
       is_public: !!route.is_public,
       tags: route.tags || [],
       notes: route.notes || '',
+      story: route.story || null,
+      ai_summary: route.ai_summary || null,
       views: route.views || 0,
       likes: route.likes || 0,
+      rating_avg: route.rating_avg || 0,
+      rating_count: route.rating_count || 0,
       verified_count: route.verified_count || 0,
+      confidence_score: route.confidence_score ?? null,
+      axis_scores: route.axis_scores ?? null,
+      follower_count: route.follower_count || 0,
       created_at: route.created_at,
     });
   } catch (error) {
@@ -66,9 +79,11 @@ export async function PATCH(request, { params }) {
     const update = { updated_at: new Date().toISOString() };
     if ('folder_id' in body) update.folder_id = body.folder_id || null;
     if ('name' in body && body.name.trim()) update.name = body.name.trim();
+    // Empty/whitespace-only clears the override, re-enabling the AI-generated story.
+    if ('story' in body) update.story = (body.story || '').trim().slice(0, 2000) || null;
 
     await db.collection('routes').updateOne({ id: params.id }, { $set: update });
-    return NextResponse.json({ ok: true, folder_id: update.folder_id ?? route.folder_id ?? null });
+    return NextResponse.json({ ok: true, folder_id: update.folder_id ?? route.folder_id ?? null, story: update.story });
   } catch (error) {
     console.error(`PATCH /api/routes/${params.id} failed:`, error);
     return NextResponse.json({ error: 'Failed to update route' }, { status: 500 });
@@ -103,6 +118,7 @@ export async function DELETE(request, { params }) {
     await db.collection('conditions').deleteMany({ route_id: params.id });
     await db.collection('route_notes').deleteMany({ route_id: params.id });
     await db.collection('verifications').deleteMany({ route_id: params.id });
+    await db.collection('route_follows').deleteMany({ route_id: params.id });
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error(`DELETE /api/routes/${params.id} failed:`, error);

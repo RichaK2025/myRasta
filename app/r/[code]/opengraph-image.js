@@ -4,6 +4,12 @@ export const contentType = 'image/png';
 export const size = { width: 1200, height: 630 };
 export const alt = 'Route shared on Raasta';
 
+const TAG_EMOJI = {
+  'Rain Safe': '🌧', 'Monsoon Safe': '🌧', Scenic: '🌄', 'Family Friendly': '👨‍👩‍👧',
+  'Women Safe': '🛡', 'Bike Route': '🏍', 'Truck Friendly': '🚛', Pilgrimage: '🙏',
+  'Avoid Traffic': '🚦', 'Village Route': '🏘', Adventure: '⛰', Fastest: '⚡',
+};
+
 export default async function Image({ params }) {
   const { code } = await params;
   let route = null;
@@ -18,6 +24,7 @@ export default async function Image({ params }) {
   const duration = route?.duration_sec ? `${Math.round(route.duration_sec / 60)} min` : '';
   const vibe = route?.ai_summary?.vibe;
   const verified = route?.verified_count || 0;
+  const tags = (route?.tags || []).slice(0, 3);
 
   return new ImageResponse(
     (
@@ -48,6 +55,18 @@ export default async function Image({ params }) {
           {vibe && (
             <div style={{ fontSize: 24, color: '#c084fc', marginTop: 20, fontStyle: 'italic' }}>
               “{vibe}”
+            </div>
+          )}
+          {tags.length > 0 && (
+            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+              {tags.map((tag) => (
+                <div key={tag} style={{
+                  display: 'flex', fontSize: 20, padding: '8px 18px', borderRadius: 999,
+                  background: 'rgba(255,255,255,0.08)', color: '#e5e5e5',
+                }}>
+                  {TAG_EMOJI[tag] || '📍'} {tag}
+                </div>
+              ))}
             </div>
           )}
         </div>

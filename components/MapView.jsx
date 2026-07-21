@@ -1,9 +1,48 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, useMap, CircleMarker, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, useMap, useMapEvents, CircleMarker, Marker, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import { getTileConfig, ROUTE_STYLE, START_STYLE, END_STYLE, NOTE_COLORS, getSpeedZoneColor } from '@/lib/mapProvider';
+import { alertConfidence, formatReportedAgo, resolveAlertType } from '@/lib/alertTypes';
+
+// Small icons only past this zoom, and hidden below it, per the "avoid
+// clutter" requirement for community alerts.
+const ALERT_MIN_ZOOM = 13;
+
+function alertDivIcon(icon) {
+  return L.divIcon({
+    html: `<div style="font-size:18px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))">${icon}</div>`,
+    className: '',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+}
+
+function AlertMarkers({ alerts }) {
+  const [zoom, setZoom] = useState(null);
+  useMapEvents({ zoomend: (e) => setZoom(e.target.getZoom()) });
+  const map = useMap();
+  useEffect(() => { setZoom(map.getZoom()); }, [map]);
+
+  if (zoom !== null && zoom < ALERT_MIN_ZOOM) return null;
+  return alerts.map((a) => {
+    const type = resolveAlertType(a.type);
+    if (!type) return null;
+    const confidence = alertConfidence(a.created_at, a.expires_at);
+    return (
+      <Marker key={a.id} position={[a.lat, a.lng]} icon={alertDivIcon(type.icon)}>
+        <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+          <div className="text-xs">
+            <div className="font-medium">{type.icon} {type.label}</div>
+            <div className="text-neutral-500">Reported {formatReportedAgo(a.created_at)} · Confirmed by {a.confirm_count || 0}</div>
+            <div>{confidence.icon} {confidence.label}</div>
+          </div>
+        </Tooltip>
+      </Marker>
+    );
+  });
+}
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -75,6 +114,7 @@ export default function MapView({
   mapStyle = 'standard',
   routeSegments = [],
   waypoints = [],
+  alerts = [],
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -116,8 +156,15 @@ export default function MapView({
                 ...ROUTE_STYLE,
                 color: segment.color || getSpeedZoneColor(segment.speedKmh),
                 weight: segment.weight || 5,
+                dashArray: segment.dashArray || null,
               }}
-            />
+            >
+              {segment.estimated && (
+                <Tooltip direction="top" permanent opacity={0.9} className="!text-[10px] !py-0.5 !px-1.5">
+                  Estimated route section
+                </Tooltip>
+              )}
+            </Polyline>
           );
         })}
         {showEnds && first && (
@@ -162,6 +209,7 @@ export default function MapView({
             </Tooltip>
           </CircleMarker>
         ))}
+        {alerts.length > 0 && <AlertMarkers alerts={alerts} />}
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
         {follow && last && <Recenter center={last} zoom={17} />}
         {fit && positions.length > 1 && <FitBounds points={points} />}

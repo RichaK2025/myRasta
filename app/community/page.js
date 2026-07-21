@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { MapPin, Route as RouteIcon, Clock, Gauge, Eye } from 'lucide-react';
-import { formatDistance, formatDuration } from '@/lib/geo';
+import { useRouter } from 'next/navigation';
+import { MapPin } from 'lucide-react';
+import { RouteCard } from '@/components/RouteCard';
+import { SocialProofStrip } from '@/components/SocialProofStrip';
 
 export default function CommunityPage() {
+  const router = useRouter();
   const [routes, setRoutes] = useState([]);
   useEffect(() => {
     fetch('/api/community').then((r) => r.json()).then((data) => setRoutes(data.routes || [])).catch(() => setRoutes([]));
@@ -20,33 +22,15 @@ export default function CommunityPage() {
         </div>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">Public routes shared by the community.</p>
 
-        <div className="mt-6 space-y-3">
+        <div className="mt-5">
+          <SocialProofStrip />
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {routes.map((route) => (
-            <div key={route.id} className="rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">{route.name}</h2>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">by {route.creator_name}</p>
-                </div>
-                <Link href={`/r/${route.share_code}`} className="text-sm font-medium text-neutral-900 dark:text-white">Open</Link>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mt-4 text-sm">
-                <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-3">
-                  <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"><RouteIcon className="h-4 w-4" /> Distance</div>
-                  <p className="mt-1 font-semibold">{formatDistance(route.distance_km || 0)}</p>
-                </div>
-                <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-3">
-                  <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"><Clock className="h-4 w-4" /> Duration</div>
-                  <p className="mt-1 font-semibold">{formatDuration(route.duration_sec || 0)}</p>
-                </div>
-                <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-3">
-                  <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400"><Eye className="h-4 w-4" /> Views</div>
-                  <p className="mt-1 font-semibold">{route.views || 0}</p>
-                </div>
-              </div>
-            </div>
+            <RouteCard key={route.id} route={route} onOpen={() => router.push(`/r/${route.share_code}`)} />
           ))}
-          {routes.length === 0 && <p className="text-sm text-neutral-500">No public routes yet.</p>}
+          {routes.length === 0 && <p className="text-sm text-neutral-500 dark:text-neutral-400">No public routes yet.</p>}
         </div>
       </div>
     </div>

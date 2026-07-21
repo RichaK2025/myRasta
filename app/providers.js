@@ -4,6 +4,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
+import { PwaBootstrap } from '@/components/PwaBootstrap';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,7 +18,10 @@ const queryClient = new QueryClient({
 export function Providers({ children }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <PwaBootstrap />
+        {children}
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }

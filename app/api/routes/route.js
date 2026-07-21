@@ -3,6 +3,7 @@ import { getDb } from '@/lib/mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { haversine } from '@/lib/geo';
 import { resolveUserId } from '@/lib/auth';
+import { reverseGeocode } from '@/lib/geocode';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,7 +66,12 @@ export async function GET(request) {
     const folderId = url.searchParams.get('folder_id');
     const sort = url.searchParams.get('sort') || 'recent';
     const q = {};
+    // Without a user_id, this is a public listing (Explore/Community) — only
+    // ever return routes their owner chose to publish. With a user_id, the
+    // caller is asking for their own library, which must include their
+    // private routes too.
     if (mine) q.user_id = mine;
+    else q.is_public = true;
     if (folderId) q.folder_id = folderId;
     let sortSpec = { created_at: -1 };
     if (sort === 'popular') sortSpec = { likes: -1, views: -1 };
@@ -124,6 +130,9 @@ export async function POST(request) {
 
     const { maxSpeedKmh, avgSpeedKmh } = computeSpeedStats(body.points);
     const userId = resolveUserId(request, body.user_id);
+    const start = body.start || body.points[0];
+    // Best-effort — a geocoding outage must never block saving a route.
+    const city = await reverseGeocode(start.lat, start.lng).catch(() => null);
 
     const doc = {
       id,
@@ -142,8 +151,9 @@ export async function POST(request) {
       // Authoritative, server-computed values — not the client-reported ones.
       avg_speed_kmh: avgSpeedKmh,
       max_speed_kmh: maxSpeedKmh,
-      start: body.start || body.points[0],
+      start,
       end: body.end || body.points[body.points.length - 1],
+      city,
       waypoints: Array.isArray(body.waypoints) ? body.waypoints : [],
       route_stats: body.route_stats || null,
       tracking_settings: body.tracking_settings || {},
@@ -153,7 +163,9 @@ export async function POST(request) {
       rating_avg: 0,
       rating_count: 0,
       verified_count: 0,
+      confidence_score: null,
       ai_summary: null,
+      story: null,
       created_at: new Date().toISOString(),
     };
 
