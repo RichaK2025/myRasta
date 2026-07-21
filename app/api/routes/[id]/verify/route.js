@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { VERIFY_AXES, computeConfidence, computeAxisScores } from '@/lib/verification';
+import { recomputePopularityScore } from '@/lib/popularity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,7 @@ export async function POST(request, { params }) {
       { id: routeId },
       { $set: { verified_count: all.length, confidence_score, axis_scores } }
     );
+    await recomputePopularityScore(db, routeId);
 
     return NextResponse.json({
       verified_count: all.length,

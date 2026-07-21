@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { resolveUserId } from '@/lib/auth';
+import { containsProfanity, MODERATION_MESSAGE } from '@/lib/moderation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,10 @@ export async function GET(request, { params }) {
       route_stats: route.route_stats || null,
       share_code: route.share_code,
       is_public: !!route.is_public,
+      visibility: route.visibility || (route.is_public ? 'public' : 'private'),
+      visible_group_ids: route.visible_group_ids || [],
+      visible_user_ids: route.visible_user_ids || [],
+      share_expires_at: route.share_expires_at || null,
       tags: route.tags || [],
       notes: route.notes || '',
       story: route.story || null,
@@ -46,6 +51,7 @@ export async function GET(request, { params }) {
       rating_avg: route.rating_avg || 0,
       rating_count: route.rating_count || 0,
       verified_count: route.verified_count || 0,
+      popularity_score: route.popularity_score || 0,
       confidence_score: route.confidence_score ?? null,
       axis_scores: route.axis_scores ?? null,
       follower_count: route.follower_count || 0,
@@ -80,7 +86,10 @@ export async function PATCH(request, { params }) {
     if ('folder_id' in body) update.folder_id = body.folder_id || null;
     if ('name' in body && body.name.trim()) update.name = body.name.trim();
     // Empty/whitespace-only clears the override, re-enabling the AI-generated story.
-    if ('story' in body) update.story = (body.story || '').trim().slice(0, 2000) || null;
+    if ('story' in body) {
+      if (containsProfanity(body.story)) return NextResponse.json({ error: MODERATION_MESSAGE }, { status: 400 });
+      update.story = (body.story || '').trim().slice(0, 2000) || null;
+    }
 
     await db.collection('routes').updateOne({ id: params.id }, { $set: update });
     return NextResponse.json({ ok: true, folder_id: update.folder_id ?? route.folder_id ?? null, story: update.story });

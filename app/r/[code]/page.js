@@ -8,7 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   MapPin, Clock, Gauge, Eye, Route as RouteIcon, Loader2, Sparkles, ChevronLeft, Share2,
   Star, AlertTriangle, Zap, Construction, CloudRain, Info, Send, Navigation, MessageCircle,
-  ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield, Mountain, MapPinned, ThumbsUp, ThumbsDown, X, Check, Pencil
+  ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield, Mountain, MapPinned, ThumbsUp, ThumbsDown, X, Check, Pencil,
+  WifiOff, CircleParking, Wrench, Sunset, Droplet, Tent, HeartPulse, HelpCircle
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,7 @@ import { toast } from 'sonner';
 import { AlertsSection } from '@/components/AlertsSection';
 import { ALERT_TYPES } from '@/lib/alertTypes';
 import { VERIFY_AXIS_LABELS } from '@/lib/verification';
+import { LEGACY_CATEGORY_ALIASES, resolveCategoryConfig, buildAlertPhrase } from '@/lib/noteCategories';
 import { FollowButton } from '@/components/FollowButton';
 import { VoiceCloud } from '@/components/VoiceCloud';
 import { InstallScreen } from '@/components/InstallScreen';
@@ -40,16 +42,24 @@ const CONDITION_TYPES = [
 ];
 
 const NOTE_CATEGORIES = [
-  { key: 'tea', label: 'Tea/Chai', icon: Coffee, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-600' },
+  { key: 'tea_stall', label: 'Tea Stall', icon: Coffee, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-600' },
   { key: 'food', label: 'Food', icon: Utensils, color: 'bg-orange-50 border-orange-200 text-orange-800', dot: 'bg-orange-500' },
-  { key: 'fuel', label: 'Fuel', icon: Fuel, color: 'bg-cyan-50 border-cyan-200 text-cyan-800', dot: 'bg-cyan-600' },
+  { key: 'petrol', label: 'Petrol', icon: Fuel, color: 'bg-cyan-50 border-cyan-200 text-cyan-800', dot: 'bg-cyan-600' },
+  { key: 'mechanic', label: 'Mechanic', icon: Wrench, color: 'bg-neutral-100 border-neutral-300 text-neutral-800', dot: 'bg-neutral-600' },
   { key: 'washroom', label: 'Washroom', icon: Bath, color: 'bg-blue-50 border-blue-200 text-blue-800', dot: 'bg-blue-600' },
-  { key: 'police', label: 'Police', icon: Shield, color: 'bg-indigo-50 border-indigo-200 text-indigo-800', dot: 'bg-indigo-600' },
-  { key: 'danger', label: 'Danger', icon: AlertTriangle, color: 'bg-red-50 border-red-200 text-red-800', dot: 'bg-red-600' },
-  { key: 'safe', label: 'Safe', icon: ShieldCheck, color: 'bg-green-50 border-green-200 text-green-800', dot: 'bg-green-600' },
-  { key: 'scenic', label: 'Scenic', icon: Mountain, color: 'bg-violet-50 border-violet-200 text-violet-800', dot: 'bg-violet-600' },
-  { key: 'shortcut', label: 'Shortcut', icon: Zap, color: 'bg-pink-50 border-pink-200 text-pink-800', dot: 'bg-pink-600' },
-  { key: 'warning', label: 'Warning', icon: Info, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-700' },
+  { key: 'pothole', label: 'Pothole', icon: AlertTriangle, color: 'bg-amber-50 border-amber-200 text-amber-900', dot: 'bg-amber-700' },
+  { key: 'construction', label: 'Construction', icon: Construction, color: 'bg-orange-50 border-orange-200 text-orange-900', dot: 'bg-orange-600' },
+  { key: 'scenic_view', label: 'Scenic View', icon: Mountain, color: 'bg-violet-50 border-violet-200 text-violet-800', dot: 'bg-violet-600' },
+  { key: 'sunset_point', label: 'Sunset Point', icon: Sunset, color: 'bg-orange-50 border-orange-200 text-orange-800', dot: 'bg-orange-500' },
+  { key: 'network_dead_zone', label: 'Network Dead Zone', icon: WifiOff, color: 'bg-neutral-100 border-neutral-300 text-neutral-700', dot: 'bg-neutral-500' },
+  { key: 'police_checkpoint', label: 'Police Checkpoint', icon: Shield, color: 'bg-indigo-50 border-indigo-200 text-indigo-800', dot: 'bg-indigo-600' },
+  { key: 'parking', label: 'Parking', icon: CircleParking, color: 'bg-sky-50 border-sky-200 text-sky-800', dot: 'bg-sky-600' },
+  { key: 'water_source', label: 'Water Source', icon: Droplet, color: 'bg-blue-50 border-blue-200 text-blue-700', dot: 'bg-blue-500' },
+  { key: 'campsite', label: 'Campsite', icon: Tent, color: 'bg-lime-50 border-lime-200 text-lime-800', dot: 'bg-lime-600' },
+  { key: 'hospital', label: 'Hospital', icon: HeartPulse, color: 'bg-red-50 border-red-200 text-red-800', dot: 'bg-red-600' },
+  { key: 'women_safe_stop', label: 'Women Safe Stop', icon: ShieldCheck, color: 'bg-pink-50 border-pink-200 text-pink-800', dot: 'bg-pink-600' },
+  { key: 'ev_charging', label: 'EV Charging', icon: Zap, color: 'bg-green-50 border-green-200 text-green-800', dot: 'bg-green-600' },
+  { key: 'other', label: 'Other', icon: HelpCircle, color: 'bg-neutral-100 border-neutral-300 text-neutral-700', dot: 'bg-neutral-500' },
 ];
 
 function useAnonUser() {
@@ -280,7 +290,7 @@ export default function SharePage() {
             </div>
           )}
 
-          <CommunityNotesInline routeId={route.id} user={user} notes={notes} reload={() => fetchJson(`/api/routes/${route.id}/notes`).then(setNotes).catch(() => setNotes([]))} />
+          <CommunityNotesInline routeId={route.id} user={user} notes={notes} points={route.points} reload={() => fetchJson(`/api/routes/${route.id}/notes`).then(setNotes).catch(() => setNotes([]))} />
           <ConditionsInline routeId={route.id} user={user} />
           <AlertsSection lat={route.start?.lat} lng={route.start?.lng} />
           <NearbyRoutesInline routeId={route.id} />
@@ -487,19 +497,23 @@ function VerifyBox({ route, user, onChange }) {
   );
 }
 
-function CommunityNotesInline({ routeId, user, notes, reload }) {
+function CommunityNotesInline({ routeId, user, notes, points, reload }) {
   const [text, setText] = useState('');
-  const [category, setCategory] = useState('tea');
+  const [category, setCategory] = useState('tea_stall');
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  // Post Journey Annotation: scrub the recorded track to pin the note to a
+  // specific spot instead of the route's midpoint (the previous default).
+  const [pointIndex, setPointIndex] = useState(() => Math.floor((points?.length || 1) / 2));
 
   const submit = async () => {
     if (!text.trim()) return;
     setAdding(true);
     try {
+      const at = points?.[pointIndex];
       await fetch(`/api/routes/${routeId}/notes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.uid, author: user?.name, category, text: text.trim() }),
+        body: JSON.stringify({ user_id: user?.uid, author: user?.name, category, text: text.trim(), lat: at?.lat, lng: at?.lng }),
       });
       setText(''); setShowForm(false); reload();
       toast.success('Local knowledge added 🙏');
@@ -524,6 +538,17 @@ function CommunityNotesInline({ routeId, user, notes, reload }) {
       </div>
       {showForm && (
         <div className="rounded-2xl bg-neutral-50 border border-neutral-100 p-3 mb-3">
+          {points?.length > 1 && (
+            <div className="mb-3">
+              <div className="h-32 rounded-xl overflow-hidden border border-neutral-200">
+                <MapView points={points} fit interactive={false} showEnds={false} height="100%"
+                  droppedPin={points[pointIndex] ? { lat: points[pointIndex].lat, lng: points[pointIndex].lng } : null} />
+              </div>
+              <p className="text-[11px] text-neutral-500 mt-1.5 mb-1">Where on the route?</p>
+              <input type="range" min={0} max={points.length - 1} value={pointIndex}
+                onChange={(e) => setPointIndex(parseInt(e.target.value, 10))} className="w-full accent-neutral-900" />
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5 mb-2">
             {NOTE_CATEGORIES.map(c => {
               const Icon = c.icon;
@@ -546,7 +571,9 @@ function CommunityNotesInline({ routeId, user, notes, reload }) {
       )}
       <div className="space-y-2">
         {notes.map(n => {
-          const cfg = NOTE_CATEGORIES.find(c => c.key === n.category) || NOTE_CATEGORIES[9];
+          const cfg = NOTE_CATEGORIES.find(c => c.key === n.category)
+            || NOTE_CATEGORIES.find(c => c.key === LEGACY_CATEGORY_ALIASES[n.category])
+            || NOTE_CATEGORIES[NOTE_CATEGORIES.length - 1];
           const Icon = cfg.icon;
           return (
             <div key={n.id} className={`rounded-2xl border p-3 flex items-start gap-3 ${cfg.color}`}>
@@ -767,22 +794,30 @@ function FollowMode({ route, onExit }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Smart Route Alerts: notify before approaching any enabled pin category
+  // ahead on the route (not just tea/food) — "Tea stall ahead in 500m",
+  // "Scenic viewpoint approaching", "Road damage reported ahead", per
+  // lib/noteCategories.js's alertStyle. Both a lightweight in-app toast (for
+  // everyone) and voice narration (when voiceCues is on).
   useEffect(() => {
-    if (!getSettings().voiceCues || !userPos) return;
+    if (!userPos) return;
     let cancelled = false;
+    const disabled = getSettings().disabledPinCategories || [];
     fetch(`/api/routes/${route.id}/notes`).then((r) => r.json()).then((notes) => {
       if (cancelled || !Array.isArray(notes)) return;
-      const foodStops = notes.filter((n) => ['tea', 'food'].includes(n.category) && n.lat != null && n.lng != null);
-      if (foodStops.length === 0) return;
+      const pins = notes.filter((n) => n.lat != null && n.lng != null && !disabled.includes(resolveCategoryConfig(n.category).key));
+      if (pins.length === 0) return;
       const userIdx = nearestPointIndex(route.points, userPos);
-      for (const stop of foodStops) {
-        if (announcedRef.current.has(`note-${stop.id}`)) continue;
-        const stopIdx = nearestPointIndex(route.points, { lat: stop.lat, lng: stop.lng });
-        if (stopIdx <= userIdx) continue;
-        const distanceKm = haversine(userPos, { lat: stop.lat, lng: stop.lng });
+      for (const pin of pins) {
+        if (announcedRef.current.has(`note-${pin.id}`)) continue;
+        const pinIdx = nearestPointIndex(route.points, { lat: pin.lat, lng: pin.lng });
+        if (pinIdx <= userIdx) continue;
+        const distanceKm = haversine(userPos, { lat: pin.lat, lng: pin.lng });
         if (distanceKm > 3) continue;
-        announcedRef.current.add(`note-${stop.id}`);
-        speak(`Best ${stop.category === 'tea' ? 'tea stop' : 'food stop'} coming up in about ${distanceKm < 1 ? 'less than a kilometre' : Math.round(distanceKm) + ' km'}.`, 'recommendation');
+        announcedRef.current.add(`note-${pin.id}`);
+        const phrase = buildAlertPhrase(pin.category, distanceKm);
+        toast(phrase);
+        if (getSettings().voiceCues) speak(phrase, 'recommendation');
         break; // one at a time
       }
     }).catch(() => {});

@@ -67,6 +67,9 @@ export async function POST(request) {
       id: uuidv4(),
       type: type.key,
       lat, lng,
+      // Kept only for the "Safety Reporter" badge/leaderboard count — bounded
+      // by the same TTL as the rest of the doc, not a permanent log.
+      reporter_id: body.user_id || 'anon',
       created_at: now.toISOString(),
       // Must stay a real Date (not an ISO string) for the TTL index to expire it.
       expires_at: new Date(now.getTime() + ALERT_EXPIRY_HOURS * 3600 * 1000),

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { v4 as uuidv4 } from 'uuid';
+import { recomputePopularityScore } from '@/lib/popularity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,6 +44,7 @@ export async function POST(request, { params }) {
 
     const follower_count = await db.collection('route_follows').countDocuments({ route_id: routeId });
     await db.collection('routes').updateOne({ id: routeId }, { $set: { follower_count } });
+    await recomputePopularityScore(db, routeId);
 
     return NextResponse.json({ follower_count, following_by_me: !existing });
   } catch (error) {

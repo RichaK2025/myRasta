@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Polyline, useMap, useMapEvents, CircleMarker, 
 import L from 'leaflet';
 import { getTileConfig, ROUTE_STYLE, START_STYLE, END_STYLE, NOTE_COLORS, getSpeedZoneColor } from '@/lib/mapProvider';
 import { alertConfidence, formatReportedAgo, resolveAlertType } from '@/lib/alertTypes';
+import { decodePolyline } from '@/lib/polyline';
 
 // Small icons only past this zoom, and hidden below it, per the "avoid
 // clutter" requirement for community alerts.
@@ -101,6 +102,7 @@ function ClickHandler({ onMapClick }) {
 
 export default function MapView({
   points = [],
+  encodedPolyline = null,
   center,
   zoom = 15,
   follow = false,
@@ -119,7 +121,12 @@ export default function MapView({
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  const positions = points.map((p) => [p.lat, p.lng]);
+  // A route fetched with ?format=polyline has no `points` — decode the
+  // compact string instead. No per-point speed/timestamp in this case, so
+  // routeSegments (speed coloring) isn't available for polyline-sourced
+  // routes; that's fine for the list-preview use case this format is for.
+  const effectivePoints = points.length > 0 ? points : (encodedPolyline ? decodePolyline(encodedPolyline) : []);
+  const positions = effectivePoints.map((p) => [p.lat, p.lng]);
   const initialCenter = center || (positions[0] ? positions[0] : [20.5937, 78.9629]);
   const last = positions[positions.length - 1];
   const first = positions[0];
@@ -212,8 +219,8 @@ export default function MapView({
         {alerts.length > 0 && <AlertMarkers alerts={alerts} />}
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
         {follow && last && <Recenter center={last} zoom={17} />}
-        {fit && positions.length > 1 && <FitBounds points={points} />}
-        <AutoInvalidate watch={[points.length, mapStyle, fit]} />
+        {fit && positions.length > 1 && <FitBounds points={effectivePoints} />}
+        <AutoInvalidate watch={[effectivePoints.length, mapStyle, fit]} />
       </MapContainer>
     </div>
   );

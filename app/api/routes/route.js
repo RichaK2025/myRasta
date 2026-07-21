@@ -4,6 +4,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { haversine } from '@/lib/geo';
 import { resolveUserId } from '@/lib/auth';
 import { reverseGeocode } from '@/lib/geocode';
+import { simplifyRoute } from '@/lib/simplify';
+import { applyPolylineFormat } from '@/lib/polyline';
+import { containsProfanity, MODERATION_MESSAGE } from '@/lib/moderation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,6 +68,13 @@ export async function GET(request) {
     const mine = url.searchParams.get('user_id');
     const folderId = url.searchParams.get('folder_id');
     const sort = url.searchParams.get('sort') || 'recent';
+    const cityFilter = url.searchParams.get('city');
+    const routeTypeFilter = url.searchParams.get('route_type');
+    const minDistance = parseFloat(url.searchParams.get('minDistance'));
+    const maxDistance = parseFloat(url.searchParams.get('maxDistance'));
+    const near = url.searchParams.get('near'); // "lat,lng"
+    const radiusKm = Math.min(200, parseFloat(url.searchParams.get('radiusKm')) || 25);
+
     const q = {};
     // Without a user_id, this is a public listing (Explore/Community) — only
     // ever return routes their owner chose to publish. With a user_id, the
@@ -73,12 +83,39 @@ export async function GET(request) {
     if (mine) q.user_id = mine;
     else q.is_public = true;
     if (folderId) q.folder_id = folderId;
+    if (cityFilter) q.city = cityFilter;
+    if (routeTypeFilter) q.route_type = routeTypeFilter;
+    if (Number.isFinite(minDistance) || Number.isFinite(maxDistance)) {
+      q.distance_km = {};
+      if (Number.isFinite(minDistance)) q.distance_km.$gte = minDistance;
+      if (Number.isFinite(maxDistance)) q.distance_km.$lte = maxDistance;
+    }
+    let nearPoint = null;
+    if (near) {
+      const [lat, lng] = near.split(',').map(Number);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        nearPoint = { lat, lng };
+        const latDelta = radiusKm / 111;
+        const lngDelta = radiusKm / (111 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+        q['start.lat'] = { $gte: lat - latDelta, $lte: lat + latDelta };
+        q['start.lng'] = { $gte: lng - lngDelta, $lte: lng + lngDelta };
+      }
+    }
+
     let sortSpec = { created_at: -1 };
-    if (sort === 'popular') sortSpec = { likes: -1, views: -1 };
+    if (sort === 'popular') sortSpec = { popularity_score: -1, views: -1 };
     if (sort === 'trending') sortSpec = { views: -1, created_at: -1 };
 
-    const docs = await db.collection('routes').find(q).sort(sortSpec).limit(100).toArray();
-    return NextResponse.json(docs.map((doc) => ({
+    let docs = await db.collection('routes').find(q).sort(sortSpec).limit(nearPoint ? 300 : 100).toArray();
+    if (nearPoint) {
+      docs = docs
+        .filter((d) => d.start)
+        .filter((d) => haversine(d.start, nearPoint) <= radiusKm)
+        .slice(0, 100);
+    }
+
+    const format = url.searchParams.get('format');
+    return NextResponse.json(docs.map((doc) => applyPolylineFormat({
       id: doc.id,
       name: doc.name,
       creator_name: doc.creator_name,
@@ -92,12 +129,19 @@ export async function GET(request) {
       points: doc.points || [],
       share_code: doc.share_code,
       tags: doc.tags || [],
+      city: doc.city || null,
+      story: doc.story || null,
+      ai_summary: doc.ai_summary || null,
       views: doc.views || 0,
       likes: doc.likes || 0,
+      rating_avg: doc.rating_avg || 0,
+      rating_count: doc.rating_count || 0,
       verified_count: doc.verified_count || 0,
+      follower_count: doc.follower_count || 0,
+      popularity_score: doc.popularity_score || 0,
       created_at: doc.created_at,
       route_type: doc.route_type || 'General',
-    })));
+    }, format)));
   } catch (error) {
     console.error('GET /api/routes failed:', error);
     return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
@@ -120,6 +164,10 @@ export async function POST(request) {
     return NextResponse.json({ error: 'A route needs at least two tracked points' }, { status: 400 });
   }
 
+  if (containsProfanity(body.name) || containsProfanity(body.description) || containsProfanity(body.notes)) {
+    return NextResponse.json({ error: MODERATION_MESSAGE }, { status: 400 });
+  }
+
   try {
     const db = await getDb();
     const id = uuidv4();
@@ -128,7 +176,10 @@ export async function POST(request) {
       shareCode = shortCode(6);
     }
 
+    // Stats are computed from the full recorded track (accuracy), storage
+    // uses the simplified one (size) — kept deliberately separate.
     const { maxSpeedKmh, avgSpeedKmh } = computeSpeedStats(body.points);
+    const simplifiedPoints = simplifyRoute(body.points);
     const userId = resolveUserId(request, body.user_id);
     const start = body.start || body.points[0];
     // Best-effort — a geocoding outage must never block saving a route.
@@ -145,7 +196,7 @@ export async function POST(request) {
       creator_name: body.creator_name || 'Anonymous',
       user_id: userId,
       folder_id: body.folder_id || null,
-      points: body.points,
+      points: simplifiedPoints,
       distance_km: body.distance_km || 0,
       duration_sec: body.duration_sec || 0,
       // Authoritative, server-computed values — not the client-reported ones.
@@ -158,11 +209,17 @@ export async function POST(request) {
       route_stats: body.route_stats || null,
       tracking_settings: body.tracking_settings || {},
       is_public: false,
+      visibility: 'private',
+      visible_group_ids: [],
+      visible_user_ids: [],
+      share_expires_at: null,
       views: 0,
       likes: 0,
       rating_avg: 0,
       rating_count: 0,
       verified_count: 0,
+      follower_count: 0,
+      popularity_score: 0,
       confidence_score: null,
       ai_summary: null,
       story: null,

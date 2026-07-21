@@ -13,8 +13,8 @@ export function RouteCard({ route, onOpen }) {
     <motion.div whileTap={{ scale: 0.98 }} onClick={onOpen}
       className="rounded-3xl border border-neutral-100 dark:border-neutral-800 bg-white dark:bg-neutral-900 overflow-hidden shadow-sm cursor-pointer">
       <div className="h-36 bg-neutral-100 dark:bg-neutral-800 relative">
-        {route.points?.length > 1 ? (
-          <MapView points={route.points} fit interactive={false} showEnds height="100%" />
+        {(route.points?.length > 1 || route.encoded_polyline) ? (
+          <MapView points={route.points} encodedPolyline={route.encoded_polyline} fit interactive={false} showEnds height="100%" />
         ) : (
           <div className="h-full flex items-center justify-center text-neutral-300 dark:text-neutral-600">
             <MapPin className="h-8 w-8" />

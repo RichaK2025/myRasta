@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { summarizeRoute } from '@/lib/emergent';
+import { recomputePopularityScore } from '@/lib/popularity';
+import { containsProfanity, MODERATION_MESSAGE } from '@/lib/moderation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -195,6 +197,7 @@ export async function POST(request) {
         { id: segments[1] },
         { $inc: { likes: delta } }
       );
+      await recomputePopularityScore(db, segments[1]);
       const doc = await db.collection('routes').findOne({ id: segments[1] });
       return NextResponse.json(stripId(doc));
     }
@@ -237,6 +240,7 @@ export async function POST(request) {
         created_at: new Date().toISOString(),
       };
       if (!comment.text) return NextResponse.json({ error: 'Empty comment' }, { status: 400 });
+      if (containsProfanity(comment.text)) return NextResponse.json({ error: MODERATION_MESSAGE }, { status: 400 });
       await db.collection('comments').insertOne(comment);
       return NextResponse.json(stripId(comment));
     }
@@ -288,6 +292,7 @@ export async function POST(request) {
         created_at: new Date().toISOString(),
       };
       if (!note.text) return NextResponse.json({ error: 'Empty note' }, { status: 400 });
+      if (containsProfanity(note.text)) return NextResponse.json({ error: MODERATION_MESSAGE }, { status: 400 });
       // If no lat/lng given, use route midpoint
       if (note.lat == null || note.lng == null) {
         const route = await db.collection('routes').findOne({ id: segments[1] });

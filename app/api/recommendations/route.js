@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { forwardGeocode } from '@/lib/geocode';
 import { haversine } from '@/lib/geo';
+import { applyPolylineFormat } from '@/lib/polyline';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +46,7 @@ export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q');
+    const format = searchParams.get('format');
     if (!q?.trim()) return NextResponse.json({ error: 'q (destination) is required' }, { status: 400 });
 
     const destination = await forwardGeocode(q.trim());
@@ -81,7 +83,8 @@ export async function GET(request) {
     const cards = MODES
       .filter((mode) => winnerIdByMode[mode.key])
       .map((mode) => ({ mode: mode.key, icon: mode.icon, label: mode.label, route: docsById[winnerIdByMode[mode.key]] }))
-      .filter((card) => card.route);
+      .filter((card) => card.route)
+      .map((card) => ({ ...card, route: applyPolylineFormat(card.route, format) }));
 
     return NextResponse.json({ destination, cards });
   } catch (error) {

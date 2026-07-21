@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('popularity_score:', d.get\\('popularity_score'\\)\\)\")",
+      "Bash(ID=$\\(cat /tmp/test_route_id2.txt\\) *)",
+      "Bash(node -e ' *)",
+      "Bash(ID=$\\(cat /tmp/test_route_id3.txt\\) *)",
+      "Bash(python3 -c \"import json,sys; print\\(json.load\\(sys.stdin\\)['id']\\)\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/groups -H \"Content-Type: application/json\" -d '{\"user_id\":\"u1\",\"name\":\"Bike Riders\",\"category\":\"Bike Riders\"}' -o /tmp/group1.json)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/groups/join -H 'Content-Type: application/json' -d '{\"user_id\":\"u2\",\"invite_code\":\"__CMDSUB_OUTPUT__\"}')",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST http://localhost:3000/api/groups/join -H \"Content-Type: application/json\" -d '{\"user_id\":\"u3\",\"invite_code\":\"BADCOD\"}')",
+      "Bash(curl -s \"http://localhost:3000/api/groups/$\\(cat /tmp/test_group_id.txt\\)?user_id=u2\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:3000/api/groups/$\\(cat /tmp/test_group_id.txt\\)?user_id=u3\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/routes -H 'Content-Type: application/json' -d '{ *)"
+    ],
+    "additionalDirectories": [
+      "/private/tmp"
+    ]
+  }
+}

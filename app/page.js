@@ -10,19 +10,22 @@ import {
   Bookmark, Check, X, Loader2, Star, AlertTriangle, TrendingUp, Flame, WifiOff, Send,
   Zap, Info, CloudRain, Construction, ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield,
   Camera, Mountain, Church, Baby, Bike, Truck, User, Home as HomeIcon, Library as LibraryIcon,
-  MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Moon, Monitor, Settings, Umbrella, Pencil
+  MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Moon, Monitor, Settings, Umbrella, Pencil, ChevronDown,
+  Wrench, Sunset, CircleParking, Droplet, Tent, HeartPulse, HelpCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { totalDistance, haversine, formatDuration, formatDistance } from '@/lib/geo';
 import Link from 'next/link';
 import { getSpeedZoneColor } from '@/lib/mapProvider';
 import { cacheRoute, listCached } from '@/lib/offlineCache';
-import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDraft, getAccuracyProfile } from '@/lib/preferences';
+import { getSettings, saveSettings, readRouteDraft, saveRouteDraft, clearRouteDraft, getAccuracyProfile, getLocalProfile, saveLocalProfile } from '@/lib/preferences';
+import { AVATARS } from '@/lib/avatars';
+import { LEGACY_CATEGORY_ALIASES, NOTE_CATEGORIES as PIN_CATEGORIES, resolveCategoryConfig } from '@/lib/noteCategories';
+import { Avatar } from '@/components/Avatar';
 import { useAuth } from '@/lib/useAuth';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { fetchJson } from '@/lib/utils';
@@ -33,6 +36,7 @@ import { SocialProofStrip } from '@/components/SocialProofStrip';
 import { FollowButton } from '@/components/FollowButton';
 import { ALERT_TYPES } from '@/lib/alertTypes';
 import { VERIFY_AXIS_LABELS } from '@/lib/verification';
+import { fuzzyIncludes } from '@/lib/fuzzy';
 import { AlertsSection } from '@/components/AlertsSection';
 
 const MapView = dynamic(() => import('@/components/MapView'), { ssr: false });
@@ -50,13 +54,23 @@ const PAUSE_POLL_INTERVAL_MS = 30000;
 // as sustained travel (vs. GPS drift while stationary) — triggers the
 // "resume recording?" nudge.
 const AUTO_RESUME_NUDGE_METERS = 40;
+// Auto-Pause: how long without a fix passing the live movement filter before
+// recording pauses itself, and how often that's checked.
+const AUTO_PAUSE_STATIONARY_MS = 60000;
+const STATIONARY_CHECK_INTERVAL_MS = 5000;
 
 const TAGS = [
   'Fastest', 'Scenic', 'Family Friendly', 'Women Safe', 'Bike Route',
   'Truck Friendly', 'Pilgrimage', 'Rain Safe', 'Monsoon Safe', 'Avoid Traffic',
-  'Village Route', 'Adventure',
+  'Village Route', 'Adventure', 'Hidden Gems',
 ];
 const ROUTE_TYPES = ['Commute', 'Road Trip', 'Bike Ride', 'Walk', 'Village', 'Delivery', 'Pilgrimage'];
+
+const INTEREST_TAGS = [
+  '🏍 Rider', '🌄 Adventurous Explorer', '🏙 City Explorer', '🛕 Pilgrimage Traveller',
+  '☕ Food Explorer', '🚚 Truck Driver', '👨‍👩‍👧 Family Traveller', '📸 Photographer',
+  '🌧 Monsoon Explorer', '🚶 Walker', '🚴 Cyclist', '🧭 Route Tracker',
+];
 
 const CONDITION_TYPES = [
   { key: 'pothole', label: 'Pothole', icon: AlertTriangle, color: 'text-amber-700 bg-amber-50 border-amber-200' },
@@ -68,21 +82,31 @@ const CONDITION_TYPES = [
 ];
 
 const NOTE_CATEGORIES = [
-  { key: 'tea', label: 'Tea/Chai', icon: Coffee, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-600' },
+  { key: 'tea_stall', label: 'Tea Stall', icon: Coffee, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-600' },
   { key: 'food', label: 'Food', icon: Utensils, color: 'bg-orange-50 border-orange-200 text-orange-800', dot: 'bg-orange-500' },
-  { key: 'fuel', label: 'Fuel', icon: Fuel, color: 'bg-cyan-50 border-cyan-200 text-cyan-800', dot: 'bg-cyan-600' },
+  { key: 'petrol', label: 'Petrol', icon: Fuel, color: 'bg-cyan-50 border-cyan-200 text-cyan-800', dot: 'bg-cyan-600' },
+  { key: 'mechanic', label: 'Mechanic', icon: Wrench, color: 'bg-neutral-100 border-neutral-300 text-neutral-800', dot: 'bg-neutral-600' },
   { key: 'washroom', label: 'Washroom', icon: Bath, color: 'bg-blue-50 border-blue-200 text-blue-800', dot: 'bg-blue-600' },
-  { key: 'police', label: 'Police', icon: Shield, color: 'bg-indigo-50 border-indigo-200 text-indigo-800', dot: 'bg-indigo-600' },
-  { key: 'danger', label: 'Danger', icon: AlertTriangle, color: 'bg-red-50 border-red-200 text-red-800', dot: 'bg-red-600' },
-  { key: 'safe', label: 'Safe', icon: ShieldCheck, color: 'bg-green-50 border-green-200 text-green-800', dot: 'bg-green-600' },
-  { key: 'scenic', label: 'Scenic', icon: Mountain, color: 'bg-violet-50 border-violet-200 text-violet-800', dot: 'bg-violet-600' },
-  { key: 'shortcut', label: 'Shortcut', icon: Zap, color: 'bg-pink-50 border-pink-200 text-pink-800', dot: 'bg-pink-600' },
-  { key: 'warning', label: 'Warning', icon: Info, color: 'bg-amber-50 border-amber-200 text-amber-800', dot: 'bg-amber-700' },
+  { key: 'pothole', label: 'Pothole', icon: AlertTriangle, color: 'bg-amber-50 border-amber-200 text-amber-900', dot: 'bg-amber-700' },
+  { key: 'construction', label: 'Construction', icon: Construction, color: 'bg-orange-50 border-orange-200 text-orange-900', dot: 'bg-orange-600' },
+  { key: 'scenic_view', label: 'Scenic View', icon: Mountain, color: 'bg-violet-50 border-violet-200 text-violet-800', dot: 'bg-violet-600' },
+  { key: 'sunset_point', label: 'Sunset Point', icon: Sunset, color: 'bg-orange-50 border-orange-200 text-orange-800', dot: 'bg-orange-500' },
+  { key: 'network_dead_zone', label: 'Network Dead Zone', icon: WifiOff, color: 'bg-neutral-100 border-neutral-300 text-neutral-700', dot: 'bg-neutral-500' },
+  { key: 'police_checkpoint', label: 'Police Checkpoint', icon: Shield, color: 'bg-indigo-50 border-indigo-200 text-indigo-800', dot: 'bg-indigo-600' },
+  { key: 'parking', label: 'Parking', icon: CircleParking, color: 'bg-sky-50 border-sky-200 text-sky-800', dot: 'bg-sky-600' },
+  { key: 'water_source', label: 'Water Source', icon: Droplet, color: 'bg-blue-50 border-blue-200 text-blue-700', dot: 'bg-blue-500' },
+  { key: 'campsite', label: 'Campsite', icon: Tent, color: 'bg-lime-50 border-lime-200 text-lime-800', dot: 'bg-lime-600' },
+  { key: 'hospital', label: 'Hospital', icon: HeartPulse, color: 'bg-red-50 border-red-200 text-red-800', dot: 'bg-red-600' },
+  { key: 'women_safe_stop', label: 'Women Safe Stop', icon: ShieldCheck, color: 'bg-pink-50 border-pink-200 text-pink-800', dot: 'bg-pink-600' },
+  { key: 'ev_charging', label: 'EV Charging', icon: Zap, color: 'bg-green-50 border-green-200 text-green-800', dot: 'bg-green-600' },
+  { key: 'other', label: 'Other', icon: HelpCircle, color: 'bg-neutral-100 border-neutral-300 text-neutral-700', dot: 'bg-neutral-500' },
 ];
 
 const EXPLORE_CATEGORIES = [
   { key: 'trending', label: 'Trending', icon: TrendingUp },
   { key: 'popular', label: 'Popular', icon: Flame },
+  { key: 'recent', label: 'Recent', icon: Clock },
+  { key: 'nearby', label: 'Nearby', icon: MapPin },
   { key: 'Scenic', label: 'Scenic', icon: Mountain },
   { key: 'Women Safe', label: 'Women Safe', icon: ShieldCheck },
   { key: 'Family Friendly', label: 'Family', icon: Baby },
@@ -182,6 +206,28 @@ function BottomNav({ active, onNav }) {
 }
 
 // ============= HOME =============
+// Live Trip Sharing viewer — "Rahul is currently travelling," from the
+// live_trips status pointer (current position only, never a track).
+function LiveTripsSection({ user }) {
+  const [trips, setTrips] = useState([]);
+  useEffect(() => {
+    if (!user?.uid) return;
+    // Membership is resolved server-side — no need to fetch groups first.
+    fetchJson(`/api/live-trips?viewer_id=${user.uid}`).then(setTrips).catch(() => setTrips([]));
+  }, [user]);
+  if (trips.length === 0) return null;
+  return (
+    <div className="mt-4 space-y-2">
+      {trips.map((t) => (
+        <div key={t.user_id} className="flex items-center gap-2 rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 px-4 py-2.5">
+          <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+          <p className="text-sm">{t.name} is currently travelling.</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Home({ onNav, user }) {
   const [myRoutes, setMyRoutes] = useState([]);
   const [trending, setTrending] = useState([]);
@@ -264,6 +310,7 @@ function Home({ onNav, user }) {
         <div className="mt-4">
           <SocialProofStrip />
         </div>
+        <LiveTripsSection user={user} />
 
         {trending.length > 0 && (
           <div className="mt-8">
@@ -310,7 +357,7 @@ function Home({ onNav, user }) {
 
 // ============= ROUTE CARD =============
 // ============= RECORD =============
-function Record({ onBack, onDone }) {
+function Record({ user, onBack, onDone }) {
   const [points, setPoints] = useState([]);
   const [status, setStatus] = useState('idle');
   const [elapsed, setElapsed] = useState(0);
@@ -322,6 +369,10 @@ function Record({ onBack, onDone }) {
   const [draftSaved, setDraftSaved] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [showAlertPicker, setShowAlertPicker] = useState(false);
+  const [showPinPicker, setShowPinPicker] = useState(false);
+  const [liveSharing, setLiveSharing] = useState(false);
+  const liveShareIntervalRef = useRef(null);
+  const [stopPrompt, setStopPrompt] = useState(null); // {lat,lng} when Auto-Pause suggests "Were you stopping here?"
   const [reportingAlert, setReportingAlert] = useState(false);
   const watchIdRef = useRef(null);
   const startTimeRef = useRef(null);
@@ -340,6 +391,14 @@ function Record({ onBack, onDone }) {
   const lastPausePollRef = useRef(null);
   const pauseWatchIntervalRef = useRef(null);
   const nudgeShownRef = useRef(false);
+  // Auto-Pause: timestamp of the last fix that passed the live movement
+  // filter, checked on an interval while recording; true when the current
+  // pause was triggered by stationarity rather than a manual tap, so the
+  // resume side knows whether to ask first or just resume automatically.
+  const lastMovementAtRef = useRef(null);
+  const lastMovementPointRef = useRef(null); // where the stationary period actually started — used for the "Were you stopping here?" prompt
+  const stationaryCheckIntervalRef = useRef(null);
+  const autoPausedRef = useRef(false);
   // { from, to, distanceMeters, alreadyAppended } when significant movement
   // is detected — `alreadyAppended` distinguishes a gap caught live (the new
   // point is already in `points`) from one caught by the pause-time poll
@@ -351,6 +410,10 @@ function Record({ onBack, onDone }) {
   // ref that's refreshed every render instead, so it always resumes off the
   // current `points` (e.g. if a recovery was applied mid-pause).
   const latestStartRecordingRef = useRef(null);
+  // Same staleness concern for the stationary-check interval below, which is
+  // also armed once (at recording-start time) and calls pauseRecording much
+  // later, off whatever `points` looked like at arm-time otherwise.
+  const latestPauseRecordingRef = useRef(null);
   const distanceKm = useMemo(() => totalDistance(points), [points]);
   const routeStats = useMemo(() => ({
     distance_km: distanceKm,
@@ -380,6 +443,14 @@ function Record({ onBack, onDone }) {
     stopPauseMonitoring();
     releaseWakeLock();
     stopKeepAliveAudio();
+    // Ref check (not the `liveSharing` state, which would be stale here —
+    // this cleanup's closure is fixed at mount time) so an unmount mid-live-share
+    // still stops it instead of leaving a stale "is travelling" status.
+    if (liveShareIntervalRef.current) {
+      clearInterval(liveShareIntervalRef.current);
+      if (user?.uid) fetch(`/api/live-trips?user_id=${user.uid}`, { method: 'DELETE' }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -423,10 +494,16 @@ function Record({ onBack, onDone }) {
           const stepMeters = haversine(lastPausePollRef.current, p) * 1000;
           if (stepMeters > AUTO_RESUME_NUDGE_METERS && !nudgeShownRef.current) {
             nudgeShownRef.current = true;
-            toast('You appear to be travelling again. Resume recording?', {
-              action: { label: 'Resume', onClick: () => latestStartRecordingRef.current?.() },
-              duration: 20000,
-            });
+            if (autoPausedRef.current) {
+              // This pause wasn't the user's choice — resuming shouldn't be either.
+              toast('You appear to be moving again — resuming recording.');
+              latestStartRecordingRef.current?.();
+            } else {
+              toast('You appear to be travelling again. Resume recording?', {
+                action: { label: 'Resume', onClick: () => latestStartRecordingRef.current?.() },
+                duration: 20000,
+              });
+            }
           }
         }
         lastPausePollRef.current = p;
@@ -513,6 +590,21 @@ function Record({ onBack, onDone }) {
     // Only a resume (not the initial start) has prior points — arm the
     // anchor so the first fix we get back can be checked for a gap.
     resumeAnchorRef.current = points.length > 0 ? points[points.length - 1] : null;
+
+    // Auto-Pause: (re)start the stationary clock fresh on every
+    // start/resume, so a resume doesn't immediately look 60s-stationary
+    // against a timestamp from before the pause.
+    lastMovementAtRef.current = Date.now();
+    setStopPrompt(null);
+    if (stationaryCheckIntervalRef.current) clearInterval(stationaryCheckIntervalRef.current);
+    stationaryCheckIntervalRef.current = setInterval(() => {
+      if (getSettings().autoPause && Date.now() - lastMovementAtRef.current > AUTO_PAUSE_STATIONARY_MS) {
+        toast('Recording paused because you appear to be stationary.');
+        latestPauseRecordingRef.current?.(true);
+        setStopPrompt((prev) => prev || lastMovementPointRef.current);
+      }
+    }, STATIONARY_CHECK_INTERVAL_MS);
+
     const profile = getAccuracyProfile(settings.accuracy);
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
@@ -547,6 +639,8 @@ function Record({ onBack, onDone }) {
           const minDistanceMeters = Math.max(8, Math.min(25, accuracyMeters * 0.75));
           if (movementMeters < minDistanceMeters && speedKmh < 1.5) return prev;
           if (dtSec > 0 && (movementMeters / dtSec) * 3.6 > 220) return prev;
+          lastMovementAtRef.current = Date.now(); // fed to the Auto-Pause stationary check below
+          lastMovementPointRef.current = p;
           return [...prev, p];
         });
         const spd = (pos.coords.speed ?? 0) * 3.6;
@@ -558,15 +652,19 @@ function Record({ onBack, onDone }) {
   };
   latestStartRecordingRef.current = startRecording;
 
-  const pauseRecording = () => {
+  const pauseRecording = (auto = false) => {
+    autoPausedRef.current = auto;
     setStatus('paused');
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     watchIdRef.current = null;
     if (timerRef.current) clearInterval(timerRef.current); timerRef.current = null;
+    if (stationaryCheckIntervalRef.current) clearInterval(stationaryCheckIntervalRef.current);
+    stationaryCheckIntervalRef.current = null;
     releaseWakeLock();
     stopKeepAliveAudio();
     startPauseMonitoring(points[points.length - 1]);
   };
+  latestPauseRecordingRef.current = pauseRecording;
 
   const recoverRoute = async () => {
     if (!recoveryPrompt) return;
@@ -596,13 +694,51 @@ function Record({ onBack, onDone }) {
   };
   const ignoreMovement = () => setRecoveryPrompt(null);
 
-  const addWaypoint = () => {
-    if (!points.length) return;
-    const marker = points[points.length - 1];
-    const label = `Waypoint ${waypoints.length + 1}`;
-    const item = { id: `${Date.now()}`, lat: marker.lat, lng: marker.lng, label, created_at: new Date().toISOString() };
+  // Smart Waypoints: one tap saves the current GPS location under a category
+  // — no manual map placement. Categorized waypoints ride the existing
+  // `waypoints` array (already part of the route doc) and become permanent
+  // Route Pins (route_notes) once the route is saved (see Save's onSaved flow).
+  const addPin = (categoryKey, atPoint) => {
+    setShowPinPicker(false);
+    const marker = atPoint || points[points.length - 1];
+    if (!marker) { toast.error('Start recording first so we know your location.'); return; }
+    const cfg = resolveCategoryConfig(categoryKey);
+    const item = { id: `${Date.now()}`, lat: marker.lat, lng: marker.lng, category: categoryKey, label: cfg.label, created_at: new Date().toISOString() };
     setWaypoints((prev) => [...prev, item]);
-    toast.success('Waypoint added');
+    toast.success(`${cfg.icon} ${cfg.label} pin added`);
+  };
+
+  // Live Trip Sharing: a lightweight status pointer (current position only,
+  // never a track) upserted on the same low-freq cadence already used for
+  // pause monitoring. Shares with every group the user belongs to — kept
+  // simple rather than a per-group picker, per "keep implementation
+  // lightweight."
+  const toggleLiveSharing = async () => {
+    if (liveSharing) {
+      setLiveSharing(false);
+      if (liveShareIntervalRef.current) clearInterval(liveShareIntervalRef.current);
+      liveShareIntervalRef.current = null;
+      if (user?.uid) fetch(`/api/live-trips?user_id=${user.uid}`, { method: 'DELETE' }).catch(() => {});
+      toast('Stopped sharing your live location.');
+      return;
+    }
+    if (!user?.uid) { toast.error('Sign in to share your live location.'); return; }
+    let groupIds = [];
+    try {
+      groupIds = (await fetchJson(`/api/groups?user_id=${user.uid}`)).map((g) => g.id);
+    } catch {}
+    const upsert = () => {
+      const at = points[points.length - 1];
+      if (!at) return;
+      fetch('/api/live-trips', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid, name: user.name, lat: at.lat, lng: at.lng, group_ids: groupIds }),
+      }).catch(() => {});
+    };
+    upsert();
+    liveShareIntervalRef.current = setInterval(upsert, PAUSE_POLL_INTERVAL_MS);
+    setLiveSharing(true);
+    toast.success('Sharing your live location with your groups.');
   };
 
   const reportAlert = async (typeKey) => {
@@ -613,7 +749,7 @@ function Record({ onBack, onDone }) {
     try {
       const res = await fetch('/api/alerts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: typeKey, lat: at.lat, lng: at.lng }),
+        body: JSON.stringify({ type: typeKey, lat: at.lat, lng: at.lng, user_id: user?.uid }),
       });
       const created = await res.json();
       if (!res.ok || created?.error) throw new Error(created?.error);
@@ -629,9 +765,17 @@ function Record({ onBack, onDone }) {
   const stopRecording = () => {
     if (watchIdRef.current != null) navigator.geolocation.clearWatch(watchIdRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
+    if (stationaryCheckIntervalRef.current) clearInterval(stationaryCheckIntervalRef.current);
+    stationaryCheckIntervalRef.current = null;
     stopPauseMonitoring();
     releaseWakeLock();
     stopKeepAliveAudio();
+    if (liveSharing) {
+      if (liveShareIntervalRef.current) clearInterval(liveShareIntervalRef.current);
+      liveShareIntervalRef.current = null;
+      setLiveSharing(false);
+      if (user?.uid) fetch(`/api/live-trips?user_id=${user.uid}`, { method: 'DELETE' }).catch(() => {});
+    }
     if (points.length < 2 || distanceKm < 0.01) { toast.error('Not enough movement recorded.'); return; }
     clearRouteDraft();
     setRecoveryPrompt(null);
@@ -761,13 +905,54 @@ function Record({ onBack, onDone }) {
             </div>
           </div>
           <div className="flex gap-2 mb-4">
-            <button onClick={addWaypoint} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">Add waypoint</button>
+            <button onClick={() => setShowPinPicker(true)} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">📍 Add Pin</button>
             <button onClick={() => { const next = saveSettings({ mapStyle: settings.mapStyle === 'satellite' ? 'standard' : 'satellite' }); setSettings(next); }} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">Map: {settings.mapStyle}</button>
           </div>
+          {showPinPicker && (
+            <div className="fixed inset-0 z-[600] flex items-end bg-black/40" onClick={() => setShowPinPicker(false)}>
+              <div className="w-full bg-white dark:bg-neutral-900 rounded-t-3xl p-6 pb-8" onClick={(e) => e.stopPropagation()}>
+                <p className="text-sm font-semibold mb-3">What's here?</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {PIN_CATEGORIES.filter((c) => !settings.disabledPinCategories?.includes(c.key)).map((c) => (
+                    <button key={c.key} onClick={() => addPin(c.key)}
+                      className="flex flex-col items-center gap-1 rounded-2xl border border-neutral-200 dark:border-neutral-700 py-3 text-[11px] font-medium text-center">
+                      <span className="text-xl">{c.icon}</span> {c.label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowPinPicker(false)} className="w-full text-center text-xs text-neutral-500 dark:text-neutral-400 mt-3 py-2">Cancel</button>
+              </div>
+            </div>
+          )}
+          {stopPrompt && (
+            <div className="mb-4 rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 p-4">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-white">Were you stopping here?</p>
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                {['tea_stall', 'food', 'petrol'].map((key) => {
+                  const cfg = resolveCategoryConfig(key);
+                  return (
+                    <button key={key} onClick={() => { addPin(key, stopPrompt); setStopPrompt(null); }}
+                      className="flex flex-col items-center gap-1 rounded-xl border border-neutral-200 dark:border-neutral-700 py-2.5 text-[11px] font-medium">
+                      <span className="text-lg">{cfg.icon}</span> {cfg.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <button onClick={() => { addPin('other', stopPrompt); setStopPrompt(null); }}
+                  className="h-9 rounded-xl border border-neutral-200 dark:border-neutral-700 text-xs font-medium">Rest Stop</button>
+                <button onClick={() => setStopPrompt(null)} className="h-9 rounded-xl border border-neutral-200 dark:border-neutral-700 text-xs font-medium">Ignore</button>
+              </div>
+            </div>
+          )}
           {status !== 'idle' && (
-            <div className="mb-4">
-              <button onClick={() => setShowAlertPicker(true)} className="w-full rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm flex items-center justify-center gap-1.5">
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setShowAlertPicker(true)} className="flex-1 rounded-full border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm flex items-center justify-center gap-1.5">
                 🚨 Report Police Checking
+              </button>
+              <button onClick={toggleLiveSharing}
+                className={`flex-1 rounded-full border px-3 py-2 text-sm flex items-center justify-center gap-1.5 ${liveSharing ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'border-neutral-200 dark:border-neutral-700'}`}>
+                📡 {liveSharing ? 'Sharing Live' : 'Share Live Location'}
               </button>
             </div>
           )}
@@ -810,7 +995,7 @@ function Record({ onBack, onDone }) {
           )}
           {status === 'recording' && (
             <div className="grid grid-cols-2 gap-3">
-              <motion.button whileTap={{ scale: 0.97 }} onClick={pauseRecording}
+              <motion.button whileTap={{ scale: 0.97 }} onClick={() => pauseRecording()}
                 className="h-16 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white font-semibold flex items-center justify-center gap-2">
                 <Pause className="h-5 w-5" /> Pause
               </motion.button>
@@ -899,6 +1084,16 @@ function Save({ data, user, onBack, onSaved }) {
       cacheRoute(created);
       toast.success('Route saved!');
       fetch(`/api/routes/${created.id}/summarize`, { method: 'POST' }).catch(() => {});
+      // Smart Waypoints: categorized pins added one-tap during recording
+      // become permanent Route Pins (route_notes) now that the route has an
+      // id — plain (uncategorized) waypoints stay exactly as before.
+      for (const wp of data.waypoints || []) {
+        if (!wp.category) continue;
+        fetch(`/api/routes/${created.id}/notes`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user?.uid, author: user?.name || 'Anonymous', category: wp.category, text: wp.label, lat: wp.lat, lng: wp.lng }),
+        }).catch(() => {});
+      }
       onSaved(created);
     } catch (err) {
       toast.error(err.message || 'Failed to save. Try again.');
@@ -1227,9 +1422,12 @@ function VerifiedPill({ route, user, onChange }) {
 function CommunityNotes({ routeId, user, points }) {
   const [items, setItems] = useState([]);
   const [text, setText] = useState('');
-  const [category, setCategory] = useState('tea');
+  const [category, setCategory] = useState('tea_stall');
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  // Post Journey Annotation: scrub the recorded track to pin the note to a
+  // specific spot instead of the route's midpoint (the previous default).
+  const [pointIndex, setPointIndex] = useState(() => Math.floor((points?.length || 1) / 2));
 
   const load = () => fetchJson(`/api/routes/${routeId}/notes`).then(setItems).catch(() => setItems([]));
   useEffect(() => { load(); }, [routeId]);
@@ -1238,9 +1436,10 @@ function CommunityNotes({ routeId, user, points }) {
     if (!text.trim()) return;
     setAdding(true);
     try {
+      const at = points?.[pointIndex];
       await fetch(`/api/routes/${routeId}/notes`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.uid, author: user?.name, category, text: text.trim() }),
+        body: JSON.stringify({ user_id: user?.uid, author: user?.name, category, text: text.trim(), lat: at?.lat, lng: at?.lng }),
       });
       setText(''); setShowForm(false); load();
       toast.success('Local knowledge added 🙏');
@@ -1266,6 +1465,18 @@ function CommunityNotes({ routeId, user, points }) {
 
       {showForm && (
         <div className="rounded-2xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-3 mb-3">
+          {points?.length > 1 && (
+            <div className="mb-3">
+              <div className="h-32 rounded-xl overflow-hidden border border-neutral-200 dark:border-neutral-700">
+                <MapView points={points} fit interactive={false} showEnds={false} height="100%"
+                  droppedPin={points[pointIndex] ? { lat: points[pointIndex].lat, lng: points[pointIndex].lng } : null} />
+              </div>
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1.5 mb-1">Where on the route?</p>
+              <input type="range" min={0} max={points.length - 1} value={pointIndex}
+                onChange={(e) => setPointIndex(parseInt(e.target.value, 10))}
+                className="w-full accent-neutral-900 dark:accent-white" />
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5 mb-2">
             {NOTE_CATEGORIES.map(c => {
               const Icon = c.icon;
@@ -1289,7 +1500,9 @@ function CommunityNotes({ routeId, user, points }) {
 
       <div className="space-y-2">
         {items.map(n => {
-          const cfg = NOTE_CATEGORIES.find(c => c.key === n.category) || NOTE_CATEGORIES[9];
+          const cfg = NOTE_CATEGORIES.find(c => c.key === n.category)
+            || NOTE_CATEGORIES.find(c => c.key === LEGACY_CATEGORY_ALIASES[n.category])
+            || NOTE_CATEGORIES[NOTE_CATEGORIES.length - 1];
           const Icon = cfg.icon;
           return (
             <div key={n.id} className={`rounded-2xl border p-3 flex items-start gap-3 ${cfg.color}`}>
@@ -1692,25 +1905,65 @@ function Explore({ onBack, onOpen }) {
   const [routes, setRoutes] = useState(null);
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('trending');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({ city: '', route_type: '', distance: '' });
+  const [cities, setCities] = useState([]);
 
   useEffect(() => {
-    let url;
-    if (cat === 'trending' || cat === 'popular') {
-      url = `/api/routes?sort=${cat}`;
-    } else {
-      url = `/api/routes?sort=trending`; // filter client-side by tag
+    fetchJson('/api/routes/cities').then(setCities).catch(() => setCities([]));
+  }, []);
+
+  const buildParams = () => {
+    const params = new URLSearchParams();
+    if (filters.city) params.set('city', filters.city);
+    if (filters.route_type) params.set('route_type', filters.route_type);
+    if (filters.distance === 'short') params.set('maxDistance', '10');
+    if (filters.distance === 'medium') { params.set('minDistance', '10'); params.set('maxDistance', '50'); }
+    if (filters.distance === 'long') params.set('minDistance', '50');
+    return params;
+  };
+
+  // Debounced search — searches every publicly saved route, not just what's
+  // already loaded for the current category tab (the bug this replaces).
+  useEffect(() => {
+    if (!q.trim()) return;
+    const t = setTimeout(() => {
+      fetchJson(`/api/search?q=${encodeURIComponent(q.trim())}`).then(setRoutes).catch(() => setRoutes([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  useEffect(() => {
+    if (q.trim()) return; // search box takes over while active
+    const params = buildParams();
+
+    if (cat === 'nearby') {
+      if (!navigator.geolocation) { setRoutes([]); return; }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          params.set('near', `${pos.coords.latitude},${pos.coords.longitude}`);
+          params.set('radiusKm', '50');
+          fetchJson(`/api/routes?${params.toString()}`).then(setRoutes).catch(() => setRoutes([]));
+        },
+        () => setRoutes([]),
+      );
+      return;
     }
-    fetchJson(url).then((data) => {
-      if (cat !== 'trending' && cat !== 'popular') {
+
+    if (cat === 'trending' || cat === 'popular' || cat === 'recent') {
+      params.set('sort', cat);
+    } else {
+      params.set('sort', 'trending'); // tag categories still filter client-side below
+    }
+    fetchJson(`/api/routes?${params.toString()}`).then((data) => {
+      if (cat !== 'trending' && cat !== 'popular' && cat !== 'recent' && cat !== 'nearby') {
         setRoutes(data.filter(r => r.tags?.includes(cat)));
       } else setRoutes(data);
     }).catch(() => setRoutes([]));
-  }, [cat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cat, q, filters]);
 
-  const filtered = (routes || []).filter(r =>
-    !q || r.name.toLowerCase().includes(q.toLowerCase()) ||
-    r.tags?.some(t => t.toLowerCase().includes(q.toLowerCase()))
-  );
+  const routesList = routes || [];
 
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
@@ -1719,26 +1972,57 @@ function Explore({ onBack, onOpen }) {
         <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Discover routes curated by locals</p>
       </div>
       <div className="px-6">
-        <div className="relative">
-          <Search className="h-4 w-4 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search routes..."
-            className="pl-11 h-12 rounded-2xl border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900" />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search routes, cities, tags..."
+              className="pl-11 h-12 rounded-2xl border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900" />
+          </div>
+          <button onClick={() => setShowFilters((s) => !s)}
+            className={`h-12 w-12 shrink-0 rounded-2xl border flex items-center justify-center ${showFilters ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'border-neutral-200 dark:border-neutral-800'}`}>
+            <Settings className="h-4 w-4" />
+          </button>
         </div>
-        <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-1">
-          {EXPLORE_CATEGORIES.map(t => (
-            <button key={t.key} onClick={() => setCat(t.key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1 ${cat === t.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'}`}>
-              <t.icon className="h-3 w-3" /> {t.label}
-            </button>
-          ))}
-        </div>
+        {showFilters && (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <select value={filters.city} onChange={(e) => setFilters(f => ({ ...f, city: e.target.value }))}
+              className="h-10 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs px-2">
+              <option value="">Any city</option>
+              {cities.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={filters.route_type} onChange={(e) => setFilters(f => ({ ...f, route_type: e.target.value }))}
+              className="h-10 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs px-2">
+              <option value="">Any type</option>
+              {ROUTE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select value={filters.distance} onChange={(e) => setFilters(f => ({ ...f, distance: e.target.value }))}
+              className="h-10 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs px-2">
+              <option value="">Any distance</option>
+              <option value="short">Under 10 km</option>
+              <option value="medium">10-50 km</option>
+              <option value="long">50+ km</option>
+            </select>
+          </div>
+        )}
+        {!q.trim() && (
+          <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar pb-1">
+            {EXPLORE_CATEGORIES.map(t => (
+              <button key={t.key} onClick={() => setCat(t.key)}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1 ${cat === t.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700'}`}>
+                <t.icon className="h-3 w-3" /> {t.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div className="px-6 mt-5 space-y-3">
         {routes === null && [1,2,3].map(i => <div key={i} className="rounded-3xl h-56 bg-neutral-100 dark:bg-neutral-900 animate-pulse" />)}
-        {routes !== null && filtered.length === 0 && (
-          <div className="text-center py-16 text-sm text-neutral-500 dark:text-neutral-400">No routes in this category yet.</div>
+        {routes !== null && routesList.length === 0 && (
+          <div className="text-center py-16 text-sm text-neutral-500 dark:text-neutral-400">
+            {q.trim() ? 'No routes found.' : 'No routes in this category yet.'}
+          </div>
         )}
-        {filtered.map(r => <RouteCard key={r.id} route={r} onOpen={() => onOpen(r.id)} />)}
+        {routesList.map(r => <RouteCard key={r.id} route={r} onOpen={() => onOpen(r.id)} />)}
       </div>
     </div>
   );
@@ -1748,13 +2032,32 @@ function Explore({ onBack, onOpen }) {
 function Library({ user, onOpen }) {
   const [routes, setRoutes] = useState(null);
   const [q, setQ] = useState('');
+  const [collapsed, setCollapsed] = useState({});
   useEffect(() => {
     if (!user) return;
     fetchJson(`/api/routes?user_id=${user.uid}`).then(setRoutes).catch(() => setRoutes([]));
   }, [user]);
-  const filtered = (routes || []).filter(r =>
-    !q || r.name.toLowerCase().includes(q.toLowerCase()) || r.tags?.some(t => t.toLowerCase().includes(q.toLowerCase()))
-  );
+
+  const matches = (r) => {
+    if (!q) return true;
+    const query = q.toLowerCase();
+    const textFields = [r.name, r.city, r.route_type, r.creator_name, r.story, r.notes, r.ai_summary?.summary, r.ai_summary?.story];
+    if (textFields.some((f) => f && f.toLowerCase().includes(query))) return true;
+    if (r.tags?.some((t) => t.toLowerCase().includes(query))) return true;
+    // Typo-tolerant fallback over a small, already-fetched set (this user's own routes).
+    return fuzzyIncludes(r.name, query) || fuzzyIncludes(r.city, query) || (r.tags || []).some((t) => fuzzyIncludes(t, query));
+  };
+  const filtered = (routes || []).filter(matches);
+
+  const groups = useMemo(() => {
+    const map = {};
+    for (const r of filtered) {
+      const key = r.city || 'Other';
+      (map[key] ||= []).push(r);
+    }
+    return Object.entries(map).sort((a, b) => b[1].length - a[1].length);
+  }, [filtered]);
+
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
       <div className="px-6 pt-14 pb-4">
@@ -1768,12 +2071,25 @@ function Library({ user, onOpen }) {
             className="pl-11 h-12 rounded-2xl border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900" />
         </div>
       </div>
-      <div className="px-6 mt-5 space-y-3">
+      <div className="px-6 mt-5 space-y-5">
         {routes === null && [1,2,3].map(i => <div key={i} className="rounded-3xl h-56 bg-neutral-100 dark:bg-neutral-900 animate-pulse" />)}
         {routes !== null && filtered.length === 0 && (
           <div className="text-center py-16 text-sm text-neutral-500 dark:text-neutral-400">No saved routes yet.</div>
         )}
-        {filtered.map(r => <RouteCard key={r.id} route={r} onOpen={() => onOpen(r.id)} />)}
+        {groups.map(([city, list]) => (
+          <div key={city}>
+            <button onClick={() => setCollapsed((c) => ({ ...c, [city]: !c[city] }))}
+              className="w-full flex items-center justify-between py-1 mb-2">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-white">{city} <span className="text-neutral-400 dark:text-neutral-500 font-normal">({list.length})</span></p>
+              <ChevronDown className={`h-4 w-4 text-neutral-400 transition-transform ${collapsed[city] ? '-rotate-90' : ''}`} />
+            </button>
+            {!collapsed[city] && (
+              <div className="space-y-3">
+                {list.map((r) => <RouteCard key={r.id} route={r} onOpen={() => onOpen(r.id)} />)}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1861,6 +2177,24 @@ function SettingsSection() {
             {settings.autoPause ? 'On' : 'Off'}
           </button>
         </div>
+        <div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2">Pin categories &amp; alerts</p>
+          <div className="grid grid-cols-3 gap-2">
+            {PIN_CATEGORIES.map((c) => {
+              const enabled = !settings.disabledPinCategories?.includes(c.key);
+              return (
+                <button key={c.key} onClick={() => {
+                  const next = enabled
+                    ? [...(settings.disabledPinCategories || []), c.key]
+                    : (settings.disabledPinCategories || []).filter((k) => k !== c.key);
+                  update({ disabledPinCategories: next });
+                }} className={`flex flex-col items-center gap-1 rounded-xl border py-2 text-[10px] font-medium ${enabled ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-400 dark:text-neutral-500'}`}>
+                  <span className="text-2xl leading-none">{c.icon}</span> {c.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
       <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-2 mt-4">Appearance</p>
       <ThemeToggle />
@@ -1868,12 +2202,309 @@ function SettingsSection() {
   );
 }
 
+// ============= LEADERBOARDS =============
+const LEADERBOARD_METRICS = [
+  { key: 'explorers', label: 'Top Explorers', unit: 'km' },
+  { key: 'contributors', label: 'Top Contributors', unit: 'contributions' },
+  { key: 'reviewers', label: 'Top Reviewers', unit: 'reviews' },
+];
+
+function Leaderboards({ onBack }) {
+  const [metric, setMetric] = useState('explorers');
+  const [city, setCity] = useState('');
+  const [cities, setCities] = useState([]);
+  const [rows, setRows] = useState(null);
+
+  useEffect(() => {
+    fetchJson('/api/routes/cities').then(setCities).catch(() => setCities([]));
+  }, []);
+  useEffect(() => {
+    const params = new URLSearchParams({ metric });
+    if (city) params.set('city', city);
+    setRows(null);
+    fetchJson(`/api/leaderboards?${params.toString()}`).then(setRows).catch(() => setRows([]));
+  }, [metric, city]);
+
+  const activeMetric = LEADERBOARD_METRICS.find((m) => m.key === metric);
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-10">
+      <div className="px-6 pt-14 pb-4 flex items-center justify-between">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-neutral-100 dark:bg-neutral-900 flex items-center justify-center">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <h1 className="text-lg font-semibold">Leaderboards</h1>
+        <div className="w-10" />
+      </div>
+      <div className="px-6">
+        <div className="flex gap-2">
+          {LEADERBOARD_METRICS.map((m) => (
+            <button key={m.key} onClick={() => setMetric(m.key)}
+              className={`flex-1 py-2 rounded-full text-xs font-medium border ${metric === m.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'}`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <select value={city} onChange={(e) => setCity(e.target.value)}
+          className="mt-3 w-full h-10 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 text-xs px-3">
+          <option value="">All cities</option>
+          {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <div className="mt-4 space-y-2">
+          {rows === null && [1,2,3].map(i => <div key={i} className="h-14 rounded-2xl bg-neutral-100 dark:bg-neutral-900 animate-pulse" />)}
+          {rows !== null && rows.length === 0 && (
+            <p className="text-center text-sm text-neutral-500 dark:text-neutral-400 py-10">No data yet{city ? ` for ${city}` : ''}.</p>
+          )}
+          {rows?.map((r, i) => (
+            <div key={r.user_id} className="flex items-center gap-3 rounded-2xl border border-neutral-100 dark:border-neutral-800 p-3">
+              <span className="text-sm font-semibold w-6 text-center text-neutral-400">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{r.name}</p>
+                <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{r.followers} followers</p>
+              </div>
+              <p className="text-sm font-semibold tabular-nums">{r.value} <span className="text-xs font-normal text-neutral-400">{activeMetric?.unit}</span></p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============= GROUPS =============
+const GROUP_CATEGORIES = ['Family', 'Bike Riders', 'Trek Group', 'Cycling Group', 'Other'];
+
+function Groups({ user, onBack, onOpenGroup }) {
+  const [groups, setGroups] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('Family');
+  const [joinCode, setJoinCode] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = () => fetchJson(`/api/groups?user_id=${user.uid}`).then(setGroups).catch(() => setGroups([]));
+  useEffect(() => { if (user) load(); }, [user]);
+
+  const create = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid, name: name.trim(), category }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data?.error);
+      setName(''); setShowCreate(false); load();
+      toast.success('Group created');
+    } catch (err) {
+      toast.error(err.message || 'Could not create group');
+    } finally { setBusy(false); }
+  };
+
+  const join = async () => {
+    if (!joinCode.trim()) return;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/groups/join', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user.uid, invite_code: joinCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data?.error);
+      setJoinCode(''); load();
+      toast.success(`Joined ${data.name}`);
+    } catch (err) {
+      toast.error(err.message || 'Invalid invite code');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-10">
+      <div className="px-6 pt-14 pb-4 flex items-center justify-between">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-neutral-100 dark:bg-neutral-900 flex items-center justify-center">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <h1 className="text-lg font-semibold">Groups</h1>
+        <div className="w-10" />
+      </div>
+      <div className="px-6">
+        <div className="flex gap-2">
+          <button onClick={() => setShowCreate((s) => !s)} className="flex-1 h-11 rounded-full bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium">
+            Create group
+          </button>
+        </div>
+        {showCreate && (
+          <div className="mt-3 rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4">
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Family"
+              className="h-11 rounded-xl border-neutral-200 dark:border-neutral-700" />
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {GROUP_CATEGORIES.map((c) => (
+                <button key={c} onClick={() => setCategory(c)}
+                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium border ${category === c ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'}`}>
+                  {c}
+                </button>
+              ))}
+            </div>
+            <button onClick={create} disabled={busy || !name.trim()} className="w-full h-10 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium mt-3 disabled:opacity-50">
+              Create
+            </button>
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-3">
+          <Input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="Have an invite code?"
+            className="h-11 rounded-xl border-neutral-200 dark:border-neutral-700 text-sm" onKeyDown={(e) => e.key === 'Enter' && join()} />
+          <button onClick={join} disabled={busy || !joinCode.trim()} className="h-11 px-4 rounded-xl border border-neutral-200 dark:border-neutral-700 text-sm font-medium disabled:opacity-50">
+            Join
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-3">
+          {groups === null && [1,2].map(i => <div key={i} className="h-16 rounded-2xl bg-neutral-100 dark:bg-neutral-900 animate-pulse" />)}
+          {groups !== null && groups.length === 0 && (
+            <p className="text-center text-sm text-neutral-500 dark:text-neutral-400 py-10">No groups yet — create one or join with a code.</p>
+          )}
+          {groups?.map((g) => (
+            <button key={g.id} onClick={() => onOpenGroup(g.id)} className="w-full flex items-center justify-between rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4 text-left">
+              <div>
+                <p className="text-sm font-semibold">{g.name}</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{g.category} · {g.member_count} member{g.member_count === 1 ? '' : 's'}</p>
+              </div>
+              <ChevronDown className="h-4 w-4 -rotate-90 text-neutral-400" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GroupDetail({ groupId, user, onBack, onOpenRoute }) {
+  const [group, setGroup] = useState(null);
+  const [routes, setRoutes] = useState([]);
+  const [collections, setCollections] = useState([]);
+  const [showCreateCollection, setShowCreateCollection] = useState(false);
+  const [collectionName, setCollectionName] = useState('');
+
+  const load = () => {
+    fetchJson(`/api/groups/${groupId}?user_id=${user.uid}`).then(setGroup).catch(() => setGroup(null));
+    fetchJson(`/api/groups/${groupId}/routes?user_id=${user.uid}`).then(setRoutes).catch(() => setRoutes([]));
+    fetchJson(`/api/groups/${groupId}/collections?user_id=${user.uid}`).then(setCollections).catch(() => setCollections([]));
+  };
+  useEffect(() => { if (user) load(); }, [groupId, user]);
+
+  const copyInvite = () => {
+    navigator.clipboard?.writeText(group.invite_code);
+    toast.success('Invite code copied');
+  };
+
+  const leaveGroup = async () => {
+    await fetch(`/api/groups/${groupId}/leave`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.uid }),
+    });
+    toast.success('Left group');
+    onBack();
+  };
+
+  const deleteGroup = async () => {
+    await fetch(`/api/groups/${groupId}?user_id=${user.uid}`, { method: 'DELETE' });
+    toast.success('Group deleted');
+    onBack();
+  };
+
+  const createCollection = async () => {
+    if (!collectionName.trim()) return;
+    await fetch(`/api/groups/${groupId}/collections`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.uid, name: collectionName.trim() }),
+    });
+    setCollectionName(''); setShowCreateCollection(false); load();
+  };
+
+  if (!group) return <div className="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-neutral-400" /></div>;
+
+  const isOwner = group.owner_id === user.uid;
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-10">
+      <div className="px-6 pt-14 pb-4 flex items-center justify-between">
+        <button onClick={onBack} className="h-10 w-10 rounded-full bg-neutral-100 dark:bg-neutral-900 flex items-center justify-center">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <h1 className="text-lg font-semibold">{group.name}</h1>
+        <div className="w-10" />
+      </div>
+      <div className="px-6">
+        <div className="rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{group.category} · {group.member_ids?.length} member{group.member_ids?.length === 1 ? '' : 's'}</p>
+              <p className="text-sm font-medium mt-1">Invite code: <span className="font-mono">{group.invite_code}</span></p>
+            </div>
+            <button onClick={copyInvite} className="text-xs font-medium px-3 py-2 rounded-full border border-neutral-200 dark:border-neutral-700 shrink-0">Copy</button>
+          </div>
+          <button onClick={isOwner ? deleteGroup : leaveGroup} className="text-xs text-red-600 dark:text-red-400 mt-3">
+            {isOwner ? 'Delete group' : 'Leave group'}
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between mt-6 mb-2">
+          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Collections</p>
+          <button onClick={() => setShowCreateCollection((s) => !s)} className="text-xs font-medium">+ New</button>
+        </div>
+        {showCreateCollection && (
+          <div className="flex items-center gap-2 mb-3">
+            <Input value={collectionName} onChange={(e) => setCollectionName(e.target.value)} placeholder="e.g. Weekend Trips"
+              className="h-10 rounded-xl border-neutral-200 dark:border-neutral-700 text-sm" onKeyDown={(e) => e.key === 'Enter' && createCollection()} />
+            <button onClick={createCollection} className="h-10 px-3 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm">Add</button>
+          </div>
+        )}
+        <div className="space-y-2 mb-6">
+          {collections.length === 0 && <p className="text-xs text-neutral-400 dark:text-neutral-500">No collections yet.</p>}
+          {collections.map((c) => (
+            <div key={c.id} className="rounded-xl border border-neutral-100 dark:border-neutral-800 p-3 text-sm">
+              {c.name} <span className="text-neutral-400 text-xs">({c.route_ids?.length || 0} routes)</span>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-2">Shared with this group</p>
+        <div className="space-y-3">
+          {routes.length === 0 && <p className="text-sm text-neutral-500 dark:text-neutral-400 py-6 text-center">No routes shared here yet.</p>}
+          {routes.map((r) => <RouteCard key={r.id} route={r} onOpen={() => onOpenRoute(r.id)} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============= PROFILE =============
-function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
+function Profile({ user, googleUser, updateName, signInWithGoogle, signOut, onNavLeaderboards, onNavGroups }) {
   const [name, setName] = useState('');
   const [editing, setEditing] = useState(false);
   const [stats, setStats] = useState({ routes: 0, verifications: 0 });
+  const [profile, setProfile] = useState(() => getLocalProfile());
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
+  const [communityStats, setCommunityStats] = useState(null);
+  const [challenges, setChallenges] = useState([]);
+  useEffect(() => {
+    if (!user) return;
+    fetchJson(`/api/users/${user.uid}/stats`).then(setCommunityStats).catch(() => setCommunityStats(null));
+    fetchJson(`/api/challenges?user_id=${user.uid}`).then(setChallenges).catch(() => setChallenges([]));
+  }, [user]);
   useEffect(() => { setName(user?.name || ''); }, [user]);
+  useEffect(() => {
+    if (googleUser) {
+      setProfile({
+        dob: googleUser.dob || null, gender: googleUser.gender || null,
+        home_city: googleUser.home_city || null, interest_tags: googleUser.interest_tags || [],
+        avatar_id: googleUser.avatar_id || 'avatar_01',
+      });
+    } else {
+      setProfile(getLocalProfile());
+    }
+  }, [googleUser]);
   useEffect(() => {
     if (!user) return;
     fetchJson(`/api/routes?user_id=${user.uid}`).then((rts) => {
@@ -1883,6 +2514,25 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
   const save = () => {
     if (name.trim()) { updateName(name.trim()); setEditing(false); toast.success('Profile updated'); }
   };
+  const saveProfile = async (patch) => {
+    const next = { ...profile, ...patch };
+    setProfile(next);
+    if (googleUser) {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      }).catch(() => null);
+      if (!res?.ok) toast.error('Could not save — try again.');
+    } else {
+      saveLocalProfile(patch);
+    }
+  };
+  const toggleInterestTag = (tag) => {
+    const has = profile.interest_tags?.includes(tag);
+    const next = has ? profile.interest_tags.filter((t) => t !== tag) : [...(profile.interest_tags || []), tag];
+    saveProfile({ interest_tags: next });
+  };
+  const age = profile.dob ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (365.25 * 24 * 3600 * 1000)) : null;
   return (
     <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
       <div className="px-6 pt-14 pb-4">
@@ -1893,9 +2543,12 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
           {googleUser?.picture ? (
             <img src={googleUser.picture} alt="" className="h-16 w-16 rounded-2xl object-cover" referrerPolicy="no-referrer" />
           ) : (
-            <div className="h-16 w-16 rounded-2xl bg-neutral-900 dark:bg-white flex items-center justify-center text-white dark:text-neutral-900 text-2xl font-semibold">
-              {user?.name?.[0]?.toUpperCase() || 'R'}
-            </div>
+            <button onClick={() => setShowAvatarPicker(true)} className="relative">
+              <Avatar avatarId={profile.avatar_id} size={64} />
+              <span className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 flex items-center justify-center">
+                <Pencil className="h-2.5 w-2.5" />
+              </span>
+            </button>
           )}
           <div className="flex-1 min-w-0">
             {editing && !googleUser ? (
@@ -1913,6 +2566,62 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
                 )}
               </>
             )}
+          </div>
+        </div>
+
+        {showAvatarPicker && (
+          <div className="fixed inset-0 z-[600] flex items-end bg-black/40" onClick={() => setShowAvatarPicker(false)}>
+            <div className="w-full bg-white dark:bg-neutral-900 rounded-t-3xl p-6 pb-8" onClick={(e) => e.stopPropagation()}>
+              <p className="text-sm font-semibold mb-3">Choose an avatar</p>
+              <div className="grid grid-cols-4 gap-3">
+                {AVATARS.map((a) => (
+                  <button key={a.id} onClick={() => { saveProfile({ avatar_id: a.id }); setShowAvatarPicker(false); }}
+                    className={`rounded-2xl p-1 ${profile.avatar_id === a.id ? 'ring-2 ring-neutral-900 dark:ring-white' : ''}`}>
+                    <Avatar avatarId={a.id} size={56} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4 space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">About you</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] text-neutral-500 dark:text-neutral-400">Date of birth</label>
+              <Input type="date" value={profile.dob || ''} onChange={(e) => saveProfile({ dob: e.target.value || null })}
+                className="mt-1 h-10 rounded-xl border-neutral-200 dark:border-neutral-700 text-sm" />
+              {age != null && <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">{age} years old</p>}
+            </div>
+            <div>
+              <label className="text-[11px] text-neutral-500 dark:text-neutral-400">Home city</label>
+              <Input value={profile.home_city || ''} onChange={(e) => setProfile((p) => ({ ...p, home_city: e.target.value }))}
+                onBlur={(e) => saveProfile({ home_city: e.target.value })}
+                placeholder="e.g. Raipur" className="mt-1 h-10 rounded-xl border-neutral-200 dark:border-neutral-700 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-neutral-500 dark:text-neutral-400">Gender (optional)</label>
+            <div className="flex gap-2 mt-1">
+              {['Male', 'Female', 'Other', 'Prefer not to say'].map((g) => (
+                <button key={g} onClick={() => saveProfile({ gender: profile.gender === g ? null : g })}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border ${profile.gender === g ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'}`}>
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-neutral-500 dark:text-neutral-400">What kind of traveller are you?</label>
+            <div className="flex flex-wrap gap-2 mt-1.5">
+              {INTEREST_TAGS.map((tag) => (
+                <button key={tag} onClick={() => toggleInterestTag(tag)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border ${profile.interest_tags?.includes(tag) ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'}`}>
+                  {tag}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1948,6 +2657,53 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Local verifications</p>
           </div>
         </div>
+        <button onClick={() => onNavGroups?.()} className="mt-4 w-full rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4 flex items-center justify-between text-left">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Groups</p>
+            <p className="text-sm font-semibold mt-1">Family, riders, trek groups — private route sharing</p>
+          </div>
+          <Users className="h-5 w-5 text-neutral-400" />
+        </button>
+        {communityStats && (
+          <div className="mt-4 rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Community level</p>
+                <p className="text-sm font-semibold mt-0.5">{communityStats.level?.label}</p>
+              </div>
+              <button onClick={() => onNavLeaderboards?.()} className="text-xs font-medium px-3 py-2 rounded-full border border-neutral-200 dark:border-neutral-700">
+                Leaderboards
+              </button>
+            </div>
+            {communityStats.badges?.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {communityStats.badges.map((b) => (
+                  <span key={b.key} className="px-2.5 py-1 rounded-full bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 text-xs">
+                    {b.icon} {b.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {challenges.length > 0 && (
+          <div className="mt-3 rounded-2xl border border-neutral-100 dark:border-neutral-800 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-2">This week's challenges</p>
+            <div className="space-y-2.5">
+              {challenges.map((c) => (
+                <div key={c.key}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-neutral-700 dark:text-neutral-300">{c.label}</span>
+                    <span className="text-neutral-400">{c.progress}/{c.target}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-neutral-100 dark:bg-neutral-800 mt-1 overflow-hidden">
+                    <div className="h-full bg-neutral-900 dark:bg-white rounded-full" style={{ width: `${Math.min(100, (c.progress / c.target) * 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <SettingsSection />
         <div className="mt-6 rounded-3xl bg-gradient-to-br from-neutral-900 to-neutral-700 text-white p-6">
           <RouteIcon className="h-6 w-6 mb-2" />
@@ -1967,32 +2723,66 @@ function Profile({ user, googleUser, updateName, signInWithGoogle, signOut }) {
 }
 
 // ============= SHARE SHEET (three states: open | mini | null) =============
+const VISIBILITY_PILLS = [
+  { key: 'public', label: 'Public' },
+  { key: 'group', label: 'Group Only' },
+  { key: 'private', label: 'Private' },
+  { key: 'selected', label: 'Selected People' },
+];
+const DURATION_PILLS = [
+  { key: 'today', label: 'Today only' },
+  { key: '24h', label: '24 hours' },
+  { key: 'permanent', label: 'Permanent' },
+];
+
 function ShareSheet({ route, user, mode, setMode }) {
   const [copied, setCopied] = useState(false);
-  const [isPublic, setIsPublic] = useState(!!route?.is_public);
+  const [visibility, setVisibility] = useState(route?.visibility || (route?.is_public ? 'public' : 'private'));
+  const [groupIds, setGroupIds] = useState(route?.visible_group_ids || []);
+  const [peopleText, setPeopleText] = useState((route?.visible_user_ids || []).join(', '));
+  const [duration, setDuration] = useState('permanent');
+  const [myGroups, setMyGroups] = useState([]);
   const [publishing, setPublishing] = useState(false);
-  useEffect(() => { setIsPublic(!!route?.is_public); }, [route?.id]);
+  useEffect(() => {
+    setVisibility(route?.visibility || (route?.is_public ? 'public' : 'private'));
+    setGroupIds(route?.visible_group_ids || []);
+    setPeopleText((route?.visible_user_ids || []).join(', '));
+  }, [route?.id]);
+  useEffect(() => {
+    if (user) fetchJson(`/api/groups?user_id=${user.uid}`).then(setMyGroups).catch(() => setMyGroups([]));
+  }, [user]);
+  const isPublic = visibility === 'public';
   // Never build a link from a route that hasn't actually been persisted —
   // this is what previously produced ".../r/undefined" links.
   if (!route?.share_code) return null;
   const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/r/${route.share_code}` : '';
-  const togglePublic = async () => {
-    const next = !isPublic;
-    setIsPublic(next); setPublishing(true);
+
+  const saveVisibility = async (next) => {
+    setPublishing(true);
     try {
       const res = await fetch(`/api/routes/${route.id}/share`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.uid, isPublic: next }),
+        body: JSON.stringify({
+          user_id: user?.uid, visibility: next.visibility ?? visibility,
+          group_ids: next.groupIds ?? groupIds,
+          user_ids: next.userIds ?? peopleText.split(',').map((s) => s.trim()).filter(Boolean),
+          expires_in: next.duration ?? duration,
+        }),
       });
       if (!res.ok) throw new Error('failed');
-      toast.success(next ? 'Published to Community feed' : 'Removed from Community feed');
+      toast.success('Sharing settings updated');
     } catch {
-      setIsPublic(!next);
       toast.error('Could not update. Try again.');
     } finally {
       setPublishing(false);
     }
   };
+  const selectVisibility = (key) => { setVisibility(key); saveVisibility({ visibility: key }); };
+  const toggleGroup = (id) => {
+    const next = groupIds.includes(id) ? groupIds.filter((g) => g !== id) : [...groupIds, id];
+    setGroupIds(next); saveVisibility({ visibility: 'group', groupIds: next });
+  };
+  const selectDuration = (key) => { setDuration(key); saveVisibility({ duration: key }); };
   const waText = `${route.name} — shared on Raasta.\n\n🗺️ Navigate Like A Local. Use my Raasta link instead of explaining directions on call:\n${shareUrl}`;
 
   const close = () => setMode(null);
@@ -2106,12 +2896,50 @@ function ShareSheet({ route, user, mode, setMode }) {
             </button>
           </div>
         </div>
-        <div className="flex items-center justify-between gap-3 mt-4 rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-4 border border-neutral-100 dark:border-neutral-800">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Publish to Community</p>
-            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">Let other Raasta users discover this route</p>
+        <div className="mt-4 rounded-2xl bg-neutral-50 dark:bg-neutral-900 p-4 border border-neutral-100 dark:border-neutral-800">
+          <p className="text-sm font-medium">Who can see this route?</p>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {VISIBILITY_PILLS.map((v) => (
+              <button key={v.key} disabled={publishing} onClick={() => selectVisibility(v.key)}
+                className={`h-10 rounded-xl text-xs font-medium border ${visibility === v.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'}`}>
+                {v.label}
+              </button>
+            ))}
           </div>
-          <Switch checked={isPublic} disabled={publishing} onCheckedChange={togglePublic} />
+
+          {visibility === 'group' && (
+            <div className="mt-3 space-y-1.5">
+              {myGroups.length === 0 && <p className="text-[11px] text-neutral-500 dark:text-neutral-400">You're not in any groups yet.</p>}
+              {myGroups.map((g) => (
+                <label key={g.id} className="flex items-center justify-between rounded-xl border border-neutral-200 dark:border-neutral-700 px-3 py-2 text-sm">
+                  <span>☑️ Automatically share with {g.name}</span>
+                  <input type="checkbox" checked={groupIds.includes(g.id)} onChange={() => toggleGroup(g.id)} className="h-4 w-4 accent-neutral-900" />
+                </label>
+              ))}
+            </div>
+          )}
+
+          {visibility === 'selected' && (
+            <div className="mt-3">
+              <Input value={peopleText} onChange={(e) => setPeopleText(e.target.value)}
+                onBlur={() => saveVisibility({ userIds: peopleText.split(',').map((s) => s.trim()).filter(Boolean) })}
+                placeholder="Paste their user id, comma-separated" className="h-10 rounded-xl border-neutral-200 dark:border-neutral-700 text-sm" />
+            </div>
+          )}
+
+          {visibility !== 'private' && (
+            <div className="mt-3">
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mb-1.5">Sharing duration</p>
+              <div className="grid grid-cols-3 gap-2">
+                {DURATION_PILLS.map((d) => (
+                  <button key={d.key} disabled={publishing} onClick={() => selectDuration(d.key)}
+                    className={`h-9 rounded-lg text-[11px] font-medium border ${duration === d.key ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white' : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300'}`}>
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3 mt-4">
           <a href={`https://wa.me/?text=${encodeURIComponent(waText)}`} target="_blank" rel="noreferrer"
@@ -2132,6 +2960,7 @@ function ShareSheet({ route, user, mode, setMode }) {
 function App() {
   const [screen, setScreen] = useState('splash');
   const [detailId, setDetailId] = useState(null);
+  const [groupId, setGroupId] = useState(null);
   const [recordedData, setRecordedData] = useState(null);
   const [shareRoute, setShareRoute] = useState(null);
   const [shareMode, setShareMode] = useState(null); // 'open' | 'mini' | null
@@ -2143,6 +2972,7 @@ function App() {
 
   const goto = (s, id = null) => {
     if (s === 'detail' && id) setDetailId(id);
+    if (s === 'group-detail' && id) setGroupId(id);
     setScreen(s);
   };
 
@@ -2156,7 +2986,7 @@ function App() {
 
       {screen === 'home' && <Home onNav={goto} user={user} />}
       {screen === 'record' && (
-        <Record onBack={() => setScreen('home')}
+        <Record user={user} onBack={() => setScreen('home')}
           onDone={(data) => { setRecordedData(data); setScreen('save'); }} />
       )}
       {screen === 'save' && recordedData && (
@@ -2168,7 +2998,15 @@ function App() {
       {screen === 'plan' && <PlanTrip onBack={() => setScreen('home')} onOpen={(id) => goto('detail', id)} />}
       {screen === 'profile' && (
         <Profile user={user} googleUser={googleUser} updateName={updateName}
-          signInWithGoogle={signInWithGoogle} signOut={signOut} />
+          signInWithGoogle={signInWithGoogle} signOut={signOut} onNavLeaderboards={() => setScreen('leaderboards')}
+          onNavGroups={() => setScreen('groups')} />
+      )}
+      {screen === 'leaderboards' && <Leaderboards onBack={() => setScreen('profile')} />}
+      {screen === 'groups' && (
+        <Groups user={user} onBack={() => setScreen('profile')} onOpenGroup={(id) => goto('group-detail', id)} />
+      )}
+      {screen === 'group-detail' && groupId && (
+        <GroupDetail groupId={groupId} user={user} onBack={() => setScreen('groups')} onOpenRoute={(id) => goto('detail', id)} />
       )}
       {screen === 'detail' && detailId && (
         <Detail routeId={detailId} user={user} onBack={() => setScreen('home')} onShare={openShare}
