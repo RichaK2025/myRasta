@@ -63,6 +63,32 @@ function Recenter({ center, zoom }) {
   return null;
 }
 
+// Slow, cinematic drift between nearby points for the Home/Splash
+// background — a mood, not a real navigation aid. Same unmount-safety
+// concern as Recenter above: a pending flyTo firing after the map's panes
+// are torn down throws on `_leaflet_pos`, so cleanup explicitly calls
+// map.stop().
+function CinematicPan({ targets }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!targets || targets.length === 0) return;
+    let i = 0;
+    const id = window.setInterval(() => {
+      i = (i + 1) % targets.length;
+      map.flyTo(targets[i], map.getZoom(), { duration: 4 });
+    }, 7000);
+    // map.stop() itself can throw here: if React has already detached the
+    // Leaflet container's DOM node by the time this cleanup runs, stop()'s
+    // internal getZoom()/getCenter() call reads a `_leaflet_pos` that no
+    // longer exists on the (now-removed) pane element. The component is
+    // unmounting either way, so swallowing this is safe — it's not masking
+    // a real bug, just a teardown-order race with no observable effect.
+    return () => { window.clearInterval(id); try { map.stop(); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, targets?.length]);
+  return null;
+}
+
 function FitBounds({ points }) {
   const map = useMap();
   useEffect(() => {
@@ -100,6 +126,15 @@ function ClickHandler({ onMapClick }) {
   return null;
 }
 
+function locationPulseIcon() {
+  return L.divIcon({
+    html: '<div class="location-pulse"></div>',
+    className: '',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+
 export default function MapView({
   points = [],
   encodedPolyline = null,
@@ -117,6 +152,11 @@ export default function MapView({
   routeSegments = [],
   waypoints = [],
   alerts = [],
+  routePins = [],
+  showLocationPulse = false,
+  pulseCenter = null,
+  cinematic = false,
+  onTileLoad = null,
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -149,7 +189,7 @@ export default function MapView({
         touchZoom={interactive}
         attributionControl={false}
       >
-        <TileLayer url={tile.url} maxZoom={tile.maxZoom} />
+        <TileLayer url={tile.url} maxZoom={tile.maxZoom} eventHandlers={onTileLoad ? { load: onTileLoad } : undefined} />
         {positions.length > 1 && routeSegments.length === 0 && (
           <Polyline positions={positions} pathOptions={ROUTE_STYLE} />
         )}
@@ -217,6 +257,24 @@ export default function MapView({
           </CircleMarker>
         ))}
         {alerts.length > 0 && <AlertMarkers alerts={alerts} />}
+        {routePins.map((p) => (
+          <CircleMarker
+            key={p.id}
+            center={[p.lat, p.lng]}
+            radius={6}
+            pathOptions={{ color: '#fff', weight: 2, fillColor: '#111', fillOpacity: 1 }}
+          >
+            <Tooltip direction="top" offset={[0, -6]} opacity={1}>
+              <span className="text-xs font-medium">{p.name || 'Route'}</span>
+            </Tooltip>
+          </CircleMarker>
+        ))}
+        {showLocationPulse && pulseCenter && (
+          <Marker position={[pulseCenter.lat, pulseCenter.lng]} icon={locationPulseIcon()} interactive={false} />
+        )}
+        {cinematic && routePins.length > 0 && (
+          <CinematicPan targets={routePins.map((p) => [p.lat, p.lng])} />
+        )}
         {onMapClick && <ClickHandler onMapClick={onMapClick} />}
         {follow && last && <Recenter center={last} zoom={17} />}
         {fit && positions.length > 1 && <FitBounds points={effectivePoints} />}

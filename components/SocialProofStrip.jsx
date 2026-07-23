@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-export function SocialProofStrip() {
+export function SocialProofStrip({ variant = 'default' }) {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
@@ -16,6 +16,23 @@ export function SocialProofStrip() {
     { icon: '⭐', label: 'Routes Saved', value: stats.routes_saved },
     { icon: '🔗', label: 'Routes Shared', value: stats.routes_shared },
   ];
+
+  // 'glass' — a 3-column stat grid for the cinematic dark Home background
+  // (icon atop bold number atop uppercase label). 'default' keeps the
+  // original light/dark-toggle-respecting pill row used on /community.
+  if (variant === 'glass') {
+    return (
+      <div className="grid grid-cols-3 gap-2">
+        {items.map((item) => (
+          <div key={item.label} className="rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl px-3 py-3 text-center">
+            <p className="text-lg">{item.icon}</p>
+            <p className="text-lg font-bold text-white mt-1">{item.value.toLocaleString()}</p>
+            <p className="text-[9px] text-white/60 uppercase tracking-wider mt-0.5">{item.label}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="flex gap-2 overflow-x-auto pb-1 -mx-6 px-6">

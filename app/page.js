@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue, useDragControls, animate, useReducedMotion } from 'framer-motion';
 import { useTheme } from 'next-themes';
 import {
   MapPin, Play, Pause, Square, ChevronLeft, Share2, Copy, MessageCircle,
@@ -11,7 +11,8 @@ import {
   Zap, Info, CloudRain, Construction, ShieldCheck, Coffee, Utensils, Fuel, Bath, Shield,
   Camera, Mountain, Church, Baby, Bike, Truck, User, Home as HomeIcon, Library as LibraryIcon,
   MapPinned, ThumbsUp, ThumbsDown, Users, Sun, Moon, Monitor, Settings, Umbrella, Pencil, ChevronDown,
-  Wrench, Sunset, CircleParking, Droplet, Tent, HeartPulse, HelpCircle
+  Wrench, Sunset, CircleParking, Droplet, Tent, HeartPulse, HelpCircle, Landmark,
+  Bell, ChevronsRight, MoreHorizontal, ChevronRight, Circle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,6 +64,7 @@ const TAGS = [
   'Fastest', 'Scenic', 'Family Friendly', 'Women Safe', 'Bike Route',
   'Truck Friendly', 'Pilgrimage', 'Rain Safe', 'Monsoon Safe', 'Avoid Traffic',
   'Village Route', 'Adventure', 'Hidden Gems',
+  'Food', 'Treks', 'Night Safe', 'Temple Routes',
 ];
 const ROUTE_TYPES = ['Commute', 'Road Trip', 'Bike Ride', 'Walk', 'Village', 'Delivery', 'Pilgrimage'];
 
@@ -113,6 +115,31 @@ const EXPLORE_CATEGORIES = [
   { key: 'Pilgrimage', label: 'Pilgrimage', icon: Church },
   { key: 'Rain Safe', label: 'Rain Safe', icon: Umbrella },
   { key: 'Bike Route', label: 'Bike', icon: Bike },
+  { key: 'Food', label: 'Food', icon: Utensils },
+  { key: 'Treks', label: 'Treks', icon: Tent },
+  { key: 'Night Safe', label: 'Night Safe', icon: Moon },
+  { key: 'Temple Routes', label: 'Temple Routes', icon: Landmark },
+  { key: 'Truck Friendly', label: 'Truck Friendly', icon: Truck },
+];
+
+// Home's discovery pills — a curated subset/order of the above, matching the
+// premium-home spec's exact category list.
+const HOME_CATEGORY_PILLS = [
+  { key: 'Scenic', label: 'Scenic', emoji: '🌄' },
+  { key: 'Food', label: 'Food', emoji: '☕' },
+  { key: 'Bike Route', label: 'Bike Routes', emoji: '🏍' },
+  { key: 'Treks', label: 'Treks', emoji: '🏔' },
+  { key: 'Night Safe', label: 'Night Safe', emoji: '🌙' },
+  { key: 'Temple Routes', label: 'Temple Routes', emoji: '🛕' },
+  { key: 'Family Friendly', label: 'Family Friendly', emoji: '👨‍👩‍👧' },
+  { key: 'Truck Friendly', label: 'Truck Friendly', emoji: '🚚' },
+];
+
+const HOW_IT_WORKS = [
+  { icon: Circle, label: 'Record', caption: 'Capture your route', iconClass: 'fill-red-500 text-red-500' },
+  { icon: Pencil, label: 'Add Details', caption: 'Notes, photos & useful info' },
+  { icon: Share2, label: 'Share', caption: 'Share with friends' },
+  { icon: Users, label: 'Help Others', caption: 'Build better journeys' },
 ];
 
 function useServiceWorker() {
@@ -136,29 +163,233 @@ function useOnlineStatus() {
   return online;
 }
 
+function timeAgo(iso) {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// Apple-style scroll reveal — blur/translate/opacity in, once, then settled.
+// Respects prefers-reduced-motion with a plain instant fade instead.
+function Reveal({ children, className }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div className={className}
+      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 50, filter: 'blur(10px)' }}
+      whileInView={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: 'blur(0px)' }}
+      viewport={{ once: true, margin: '-10% 0px' }}
+      transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// Almost-invisible idle drift for the two hero cards only — "luxury," not
+// "look at me." Applying this everywhere would read as busy, not premium.
+const FLOAT_ANIMATE = { y: [0, -3, 0] };
+const FLOAT_TRANSITION = { duration: 5, repeat: Infinity, ease: 'easeInOut' };
+
 // ============= SPLASH =============
+// A fast, fluid cinematic brand intro (~3.2s to handoff) that plays on
+// every cold load/refresh — never on in-app navigation, since Splash only
+// ever mounts when `screen` starts at 'splash' (a real page load); goto()'s
+// internal screen switches never remount it. No geolocation, no map tiles,
+// no real geography: an abstract, deterministically-generated "road
+// network" reveals and the camera eases into it, a route line draws itself
+// and forms into the exact app logo mark (gold fading to white), the
+// wordmark settles and holds *briefly* (700-900ms — enough to read, never
+// long enough to feel like waiting), then the whole scene recedes while
+// Home is *already* mounting and revealing underneath it — the logo fades
+// away as the homepage grows in, one continuous motion rather than two
+// separate animations handed off at a hard cut.
+const SPLASH_GOLD = '#D9A94E';
+
+// Cumulative start times (seconds) for each named phase — kept as one
+// table so the sequence stays easy to re-time as a whole rather than
+// hunting per-element delays scattered through the JSX below.
+const T_NETWORK = 0.2; // Black Screen: ~200ms
+const T_ZOOM = T_NETWORK + 0.35; // Road Network Appears: ~350ms
+const T_DRAW = T_ZOOM + 0.5; // Camera Zoom: ~500ms
+const T_MORPH = T_DRAW + 0.45; // Route Draw Animation: ~450ms
+const T_GOLD = T_MORPH + 0.35; // Route Morphs Into Logo: ~350ms
+const T_WHITE = T_GOLD + 0.1; // brief gold hold before the color shifts
+const T_TEXT = T_WHITE + 0.15; // Gold -> White Transition: ~250ms (text overlaps its tail)
+const HOLD_MS = 0.8; // Hold: 700-900ms, so the brand is read, not glimpsed
+const T_HOLD_END = T_TEXT + 0.25 + HOLD_MS; // text settle (~250ms) + hold
+// Homepage overlap: background softens, panel rises and the logo fades
+// away together — Home mounts near the START of this window (not the end),
+// so its own fast reveal plays concurrently with the logo fading out.
+const T_SHRINK = T_HOLD_END;
+const SHRINK_DURATION = 0.55;
+const T_ONDONE = T_SHRINK + 0.05;
+const SPLASH_TOTAL_MS = T_ONDONE * 1000;
+
+// Seeded (NOT Math.random) so server and client always render identical
+// output — a real random source here would re-roll per render and trip a
+// hydration mismatch, same class of bug fixed elsewhere in this file.
+function generateRoadNetwork(seed) {
+  let s = seed;
+  const rand = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+  // Rounded to 2dp: Node's and the browser's float-to-string conversion can
+  // disagree on the trailing digit of a raw Math.cos/sin result (e.g.
+  // `214.0996313394852` vs `214.09963133948523`), which is a real,
+  // otherwise-invisible SSR/CSR hydration mismatch — rounding gives both
+  // environments the exact same short, unambiguous string every time.
+  const round = (n) => Math.round(n * 100) / 100;
+  const segments = [];
+  const nodes = [];
+  function branch(x, y, angle, length, depth) {
+    if (depth <= 0 || length < 10 || segments.length > 90) return;
+    const x2 = round(x + Math.cos(angle) * length);
+    const y2 = round(y + Math.sin(angle) * length);
+    segments.push({ x1: x, y1: y, x2, y2 });
+    if (depth <= 3 && rand() > 0.45 && nodes.length < 8) nodes.push({ x: x2, y: y2 });
+    const branchCount = depth > 4 ? 2 : (rand() > 0.45 ? 2 : 1);
+    for (let i = 0; i < branchCount; i++) {
+      const spread = (rand() - 0.5) * 1.3;
+      branch(x2, y2, angle + spread, length * (0.7 + rand() * 0.15), depth - 1);
+    }
+  }
+  const primaryCount = 8;
+  for (let i = 0; i < primaryCount; i++) {
+    const angle = (i / primaryCount) * Math.PI * 2 + rand() * 0.25;
+    branch(200, 185, angle, 40 + rand() * 16, 5);
+  }
+  return { segments, nodes };
+}
+
+const ROAD_NETWORK = generateRoadNetwork(7);
+
+// Scene 2-4: the abstract network reveals, the camera eases in, and a few
+// intersections pulse softly — never real geography, never city/state
+// labels, per the "completely neutral, works for every user in India" rule.
+function SplashRoadNetwork() {
+  return (
+    <motion.svg viewBox="0 0 400 370" className="absolute inset-0 h-full w-full"
+      initial={{ opacity: 0, scale: 1.06 }}
+      animate={{ opacity: [0, 0.8, 0.55], scale: 1.22 }}
+      transition={{
+        opacity: { delay: T_NETWORK, duration: 0.6, ease: [0.22, 1, 0.36, 1] },
+        scale: { delay: T_ZOOM, duration: 0.9, ease: [0.22, 1, 0.36, 1] },
+      }}
+      style={{ transformOrigin: '50% 45%' }}
+    >
+      <g style={{ filter: 'drop-shadow(0 0 3px rgba(217,169,78,0.55))' }}>
+        {ROAD_NETWORK.segments.map((seg, i) => (
+          <line key={i} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
+            stroke={SPLASH_GOLD} strokeWidth="0.8" strokeLinecap="round" opacity={0.55} />
+        ))}
+        {ROAD_NETWORK.nodes.map((n, i) => (
+          <motion.circle key={i} cx={n.x} cy={n.y} r="2.2" fill={SPLASH_GOLD}
+            initial={{ opacity: 0.3, scale: 0.8 }}
+            animate={{ opacity: [0.3, 1, 0.5], scale: [0.8, 1.3, 1] }}
+            transition={{ duration: 1.4, delay: T_ZOOM + (i % 4) * 0.1, ease: 'easeInOut' }}
+            style={{ transformOrigin: `${n.x}px ${n.y}px` }} />
+        ))}
+      </g>
+    </motion.svg>
+  );
+}
+
 function Splash({ onDone }) {
+  // Parent (`App()`) passes a new `onDone` identity on every one of its own
+  // re-renders (e.g. auth resolving mid-splash) — a ref keeps the dismiss
+  // timer set up exactly once, instead of restarting it every time.
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
   useEffect(() => {
-    const t = setTimeout(onDone, 1600);
+    const t = setTimeout(() => onDoneRef.current(), SPLASH_TOTAL_MS);
     return () => clearTimeout(t);
-  }, [onDone]);
+  }, []);
+
   return (
     <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 flex flex-col items-center justify-center bg-white dark:bg-neutral-950 z-50"
+      initial={{ opacity: 1 }} animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }} transition={{ duration: SHRINK_DURATION - 0.05 }}
+      className="fixed inset-0 flex flex-col items-center justify-center bg-black z-50 overflow-hidden"
     >
+      {/* Homepage overlap: the scene recedes — softens, shrinks and fades —
+          while the glass panel rises AND Home is already mounting/revealing
+          underneath (onDone fires right as this starts, not at its end) —
+          one continuous motion, not a hard cut to a second animation. */}
       <motion.div
-        initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.6, ease: 'easeOut' }} className="flex flex-col items-center"
+        className="absolute inset-0 flex flex-col items-center justify-center"
+        initial={{ scale: 1, filter: 'blur(0px)', opacity: 1 }}
+        animate={{ scale: 0.9, filter: 'blur(8px)', opacity: 0 }}
+        transition={{ delay: T_SHRINK, duration: SHRINK_DURATION, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="h-20 w-20 rounded-3xl bg-neutral-900 flex items-center justify-center shadow-2xl">
-          <RouteIcon className="h-10 w-10 text-white" strokeWidth={2.5} />
-        </div>
-        <motion.h1 initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}
-          className="mt-6 text-3xl font-semibold tracking-tight">Raasta</motion.h1>
-        <motion.p initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.5 }}
-          className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">Navigate Like A Local.</motion.p>
+      <SplashRoadNetwork />
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(60% 45% at 50% 40%, rgba(20,30,58,0.35), transparent 70%)',
+      }} />
+      <div className="absolute inset-0 bg-black/35 pointer-events-none" />
+
+      {/* Route Draw Animation (~450ms): the connecting path traces itself in gold. */}
+      <motion.svg viewBox="0 0 24 24" className="relative z-10 h-16 w-16"
+        style={{ filter: 'drop-shadow(0 0 10px rgba(217,169,78,0.55))' }}>
+        <motion.path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"
+          fill="none" strokeWidth="1.5" strokeLinecap="round"
+          initial={{ pathLength: 0, opacity: 0, stroke: SPLASH_GOLD }}
+          animate={{ pathLength: 1, opacity: 1, stroke: '#ffffff' }}
+          transition={{
+            pathLength: { delay: T_DRAW, duration: 0.45, ease: [0.22, 1, 0.36, 1] },
+            opacity: { delay: T_DRAW, duration: 0.45, ease: [0.22, 1, 0.36, 1] },
+            stroke: { delay: T_WHITE, duration: 0.25, ease: 'easeInOut' },
+          }} />
+        {/* Route Morphs Into Official Logo (~350ms): the two endpoint marks
+            settle in, completing the exact app logo silhouette. */}
+        <motion.circle cx="6" cy="19" r="3" fill="none" strokeWidth="1.5"
+          initial={{ opacity: 0, scale: 0.4, stroke: SPLASH_GOLD }}
+          animate={{ opacity: 1, scale: 1, stroke: '#ffffff' }}
+          transition={{
+            opacity: { delay: T_MORPH, duration: 0.18, ease: [0.22, 1, 0.36, 1] },
+            scale: { delay: T_MORPH, duration: 0.18, ease: [0.22, 1, 0.36, 1] },
+            stroke: { delay: T_WHITE, duration: 0.25, ease: 'easeInOut' },
+          }}
+          style={{ transformOrigin: '6px 19px' }} />
+        <motion.circle cx="18" cy="5" r="3" fill="none" strokeWidth="1.5"
+          initial={{ opacity: 0, scale: 0.4, stroke: SPLASH_GOLD }}
+          animate={{ opacity: 1, scale: 1, stroke: '#ffffff' }}
+          transition={{
+            opacity: { delay: T_MORPH + 0.17, duration: 0.18, ease: [0.22, 1, 0.36, 1] },
+            scale: { delay: T_MORPH + 0.17, duration: 0.18, ease: [0.22, 1, 0.36, 1] },
+            stroke: { delay: T_WHITE, duration: 0.25, ease: 'easeInOut' },
+          }}
+          style={{ transformOrigin: '18px 5px' }} />
+      </motion.svg>
+
+      {/* Wordmark settles as the gold->white transition finishes, then holds
+          just long enough to read — 700-900ms, never longer. */}
+      <motion.h1
+        initial={{ y: 14, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: T_TEXT, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 mt-5 text-[30px] font-extrabold tracking-tight text-white text-center px-8 leading-tight"
+      >
+        My Raasta
+      </motion.h1>
+      <motion.p
+        initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 0.8 }}
+        transition={{ delay: T_TEXT + 0.1, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 mt-1.5 text-sm text-white text-center"
+      >
+        Travel Like A Local
+      </motion.p>
       </motion.div>
+
+      {/* Glass panel rises together with the scene receding above — the
+          same overlap window, not a separate later step. */}
+      <motion.div
+        initial={{ y: '100%' }} animate={{ y: '0%' }}
+        transition={{ delay: T_SHRINK, duration: SHRINK_DURATION, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute inset-0 z-20 bg-white/10 backdrop-blur-2xl border-t border-white/20 rounded-t-[40px]"
+      />
     </motion.div>
   );
 }
@@ -173,7 +404,11 @@ function BottomNav({ active, onNav }) {
     { key: 'profile', label: 'Profile', icon: User },
   ];
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none">
+    <motion.div
+      initial={{ y: 44, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 44, opacity: 0 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+      className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none"
+    >
       <div className="max-w-md mx-auto px-4 pb-4 pointer-events-auto">
         <div className="bg-white dark:bg-neutral-900 rounded-3xl border border-neutral-100 dark:border-neutral-800 shadow-2xl shadow-neutral-900/10 px-2 py-2">
           <div className="grid grid-cols-5">
@@ -201,7 +436,7 @@ function BottomNav({ active, onNav }) {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -228,10 +463,30 @@ function LiveTripsSection({ user }) {
   );
 }
 
-function Home({ onNav, user }) {
+function Home({ onNav, user, skipIntroGate = false, onReady }) {
   const [myRoutes, setMyRoutes] = useState([]);
   const [trending, setTrending] = useState([]);
+  const [nearby, setNearby] = useState([]);
+  const [activity, setActivity] = useState([]);
+  const [showAllActivity, setShowAllActivity] = useState(false);
+  const [pillsExpanded, setPillsExpanded] = useState(false);
+  const [coords, setCoords] = useState(null);
   const online = useOnlineStatus();
+  const activityRef = useRef(null);
+  const reduce = useReducedMotion();
+
+  // Cinematic reveal gate: on the very first time Home appears after Splash,
+  // its content (hero text, glass cards, map backdrop) stays hidden behind a
+  // black cover until fonts/map-tiles/geolocation have all settled (or a
+  // hard cap elapses) — so refresh never shows a partially-loaded homepage.
+  // `skipIntroGate` (set by App() once this has happened once) skips all of
+  // this on ordinary in-app navigation back to Home — only a fresh load
+  // should ever feel like a "loading sequence."
+  const [fontsReady, setFontsReady] = useState(skipIntroGate);
+  const [mapReady, setMapReady] = useState(skipIntroGate);
+  const [locationSettled, setLocationSettled] = useState(skipIntroGate);
+  const [ready, setReady] = useState(skipIntroGate);
+  const readyFiredRef = useRef(skipIntroGate);
 
   useEffect(() => {
     if (!user) return;
@@ -240,117 +495,339 @@ function Home({ onNav, user }) {
     fetchJson(`/api/routes?sort=trending`).then(setTrending).catch(() => {});
   }, [user, online]);
 
+  useEffect(() => {
+    fetchJson('/api/community-activity').then(setActivity).catch(() => setActivity([]));
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.geolocation) { setLocationSettled(true); return; }
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; setLocationSettled(true); } };
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); settle(); },
+      settle,
+      { timeout: 1200 },
+    );
+    // Belt-and-suspenders: some browsers never call back if the permission
+    // prompt is left untouched, so getCurrentPosition's own timeout can't be
+    // fully relied on — this guarantees Home is never stuck waiting.
+    const t = setTimeout(settle, 1300);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (skipIntroGate) return;
+    if (!document.fonts) { setFontsReady(true); return; }
+    document.fonts.ready.then(() => setFontsReady(true)).catch(() => setFontsReady(true));
+  }, [skipIntroGate]);
+
+  useEffect(() => {
+    if (!coords) return;
+    fetchJson(`/api/routes?near=${coords.lat},${coords.lng}&radiusKm=15`).then(setNearby).catch(() => setNearby([]));
+  }, [coords]);
+
+  useEffect(() => {
+    if (skipIntroGate || readyFiredRef.current) return;
+    if (fontsReady && mapReady && locationSettled) {
+      readyFiredRef.current = true;
+      setReady(true);
+      // Bottom nav (gated on `onReady` at the App() level) rises last, once
+      // the rest of the content has already started its own fast cascade —
+      // "Bottom Navigation gently rises" is the final beat, not simultaneous.
+      const t = setTimeout(() => onReady?.(), 280);
+      return () => clearTimeout(t);
+    }
+  }, [skipIntroGate, fontsReady, mapReady, locationSettled, onReady]);
+
+  // Hard safety cap — never leave the homepage stuck behind the loading
+  // cover if one signal (usually the map's tile "load" event) stalls. Kept
+  // short on purpose: the whole reveal must read as fast, not "waiting,"
+  // and by the time this fires Home has already had Splash's own overlap
+  // window to preload in the background.
+  useEffect(() => {
+    if (skipIntroGate) return;
+    const t = setTimeout(() => {
+      if (!readyFiredRef.current) { readyFiredRef.current = true; setReady(true); onReady?.(); }
+    }, 650);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skipIntroGate]);
+
+  const float = reduce ? {} : { animate: FLOAT_ANIMATE, transition: FLOAT_TRANSITION };
+  const visiblePills = pillsExpanded ? HOME_CATEGORY_PILLS : HOME_CATEGORY_PILLS.slice(0, 4);
+
   return (
-    <div className="min-h-screen bg-white dark:bg-neutral-950 pb-28">
-      <div className="px-6 pt-14 pb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">Hi {user?.name?.split(' ')[0] || 'there'} 👋</p>
-            <h1 className="text-3xl font-semibold tracking-tight mt-1">Navigate<br /><span className="text-neutral-400 dark:text-neutral-500">Like A Local.</span></h1>
-          </div>
+    <div className="min-h-screen bg-black text-white pb-28 relative isolate">
+      {/* Fixed cinematic backdrop — stays put while content scrolls over it. */}
+      <div className="fixed inset-0 -z-10">
+        <div style={{ filter: 'blur(1.5px) brightness(1.1)' }} className="h-full w-full">
+          <MapView
+            interactive={false}
+            mapStyle="dark"
+            cinematic
+            center={coords ? [coords.lat, coords.lng] : undefined}
+            zoom={12}
+            height="100%"
+            showEnds={false}
+            routePins={nearby
+              .map((r) => ({ id: r.id, name: r.name, lat: r.points?.[0]?.lat, lng: r.points?.[0]?.lng }))
+              .filter((p) => p.lat != null && p.lng != null)}
+            showLocationPulse={!!coords}
+            pulseCenter={coords}
+            onTileLoad={() => setMapReady(true)}
+          />
         </div>
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-3 leading-relaxed max-w-[85%]">
-          Google Maps gives directions. Raasta gives recommendations — from real people who know the road.
-        </p>
-        {!online && (
-          <div className="mt-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900 px-4 py-2.5 flex items-center gap-2">
-            <WifiOff className="h-4 w-4 text-amber-700 dark:text-amber-500" />
-            <p className="text-xs text-amber-800 dark:text-amber-400">You’re offline. Showing cached routes.</p>
-          </div>
-        )}
+        <div className="absolute inset-0 horizon-glow pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/50 to-black/85 pointer-events-none" />
       </div>
 
-      <div className="px-6">
-        <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('record')}
-          className="w-full rounded-3xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 p-6 flex items-center justify-between shadow-xl shadow-neutral-900/10">
-          <div className="text-left">
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Start new</p>
-            <h2 className="text-2xl font-semibold mt-1">Record Route</h2>
-            <p className="text-sm text-neutral-400 dark:text-neutral-500 mt-1">Trace your journey with GPS</p>
-          </div>
-          <div className="h-14 w-14 rounded-full bg-white/10 dark:bg-neutral-900/10 flex items-center justify-center">
-            <Play className="h-6 w-6" fill="currentColor" />
-          </div>
-        </motion.button>
+      {/* Solid cover while Home is preparing — hides the map's own tile
+          load-in and stops any content from being visible mid-fetch. Fades
+          away together with the content reveal below, never on its own. */}
+      {!ready && <div className="fixed inset-0 z-30 bg-black pointer-events-none" />}
 
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <motion.button whileTap={{ scale: 0.97 }} onClick={() => onNav('my')}
-            className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5 text-left">
-            <Bookmark className="h-5 w-5 mb-3" />
-            <p className="text-sm font-medium">My Library</p>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{myRoutes.length} saved</p>
-          </motion.button>
-          <motion.button whileTap={{ scale: 0.97 }} onClick={() => onNav('explore')}
-            className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 p-5 text-left">
-            <Compass className="h-5 w-5 mb-3" />
-            <p className="text-sm font-medium">Explore</p>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Community routes</p>
-          </motion.button>
-        </div>
+      <motion.div
+        initial={false}
+        animate={{ opacity: ready ? 1 : 0, filter: ready ? 'blur(0px)' : 'blur(20px)' }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+      >
+      {/* Header */}
+      <div className="relative z-10 flex items-center justify-between px-6 pt-14 pb-2">
+        <RouteIcon className="h-7 w-7 text-white/90" strokeWidth={1.75} />
+        <button onClick={() => activityRef.current?.scrollIntoView({ behavior: 'smooth' })} className="relative h-9 w-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+          <Bell className="h-4 w-4 text-white/80" />
+          {activity.length > 0 && <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-red-500" />}
+        </button>
+      </div>
 
-        <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('plan')}
-          className="w-full mt-3 rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 flex items-center justify-between text-left">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Plan a Trip</p>
-            <p className="text-sm font-semibold mt-1">Get route recommendations for a destination</p>
-          </div>
-          <Search className="h-5 w-5 text-neutral-400" />
-        </motion.button>
+      <div className="relative z-10 px-6 pt-2 space-y-5">
+        {/* Reveal order 2-3: hero heading + subtitle, first to appear */}
+        <motion.div
+          initial={false}
+          animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 12 }}
+          transition={{ delay: 0, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <h1 className="text-3xl font-semibold tracking-tight">Navigate<br /><span className="text-white/60">Like a local.</span></h1>
+          <p className="text-xs text-white/60 mt-3 leading-relaxed max-w-[85%]">
+            Google Maps gives directions. Raasta gives recommendations — from real people who know the route.
+          </p>
+        </motion.div>
 
-        <div className="mt-3 rounded-3xl border border-neutral-200 dark:border-neutral-800 p-4 bg-neutral-50 dark:bg-neutral-900">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Community</p>
-              <p className="text-sm font-semibold mt-1">View public routes from everyone</p>
+        {/* Reveal order 4: CTA cards */}
+        <motion.div
+          initial={false}
+          animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 12 }}
+          transition={{ delay: 0.08, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <motion.button {...float} whileTap={{ scale: 0.98 }} onClick={() => onNav('explore', null, 'nearby')}
+            className="w-full rounded-3xl bg-white/10 border border-white/10 backdrop-blur-xl p-5 flex items-center justify-between">
+            <div className="text-left">
+              <p className="text-[10px] text-white/50 uppercase tracking-wider">Discover</p>
+              <h2 className="text-xl font-semibold mt-1">Explore Nearby</h2>
+              <p className="text-xs text-white/60 mt-0.5">Routes near you</p>
             </div>
-            <Link href="/community" className="text-sm font-medium text-neutral-900 dark:text-white">Open feed</Link>
+            <div className="h-11 w-11 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+              <ChevronsRight className="h-5 w-5" />
+            </div>
+          </motion.button>
+        </motion.div>
+
+        <motion.div
+          initial={false}
+          animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 12 }}
+          transition={{ delay: 0.11, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <motion.button {...float} whileTap={{ scale: 0.98 }} onClick={() => onNav('record')}
+            className="w-full rounded-3xl bg-white/10 border border-white/10 backdrop-blur-xl p-5 flex items-center justify-between">
+            <div className="text-left">
+              <p className="text-[10px] text-white/50 uppercase tracking-wider">Start New</p>
+              <h2 className="text-xl font-semibold mt-1">Record Journey</h2>
+              <p className="text-xs text-white/60 mt-0.5">Capture your route</p>
+            </div>
+            <div className="h-11 w-11 rounded-full bg-white flex items-center justify-center shrink-0">
+              <Play className="h-5 w-5 text-black" fill="currentColor" />
+            </div>
+          </motion.button>
+        </motion.div>
+
+        {!online && (
+          <div className="rounded-2xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 flex items-center gap-2">
+            <WifiOff className="h-4 w-4 text-amber-400" />
+            <p className="text-xs text-amber-300">You’re offline. Showing cached routes.</p>
           </div>
+        )}
+
+        {/* Reveal order 5: category chips, subtle stagger */}
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+            {visiblePills.map((c, i) => (
+              <motion.button key={c.key} onClick={() => onNav('explore', null, c.key)}
+                initial={false}
+                animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 6 }}
+                transition={{ delay: 0.16 + i * 0.06, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                className="shrink-0 px-3.5 py-2 rounded-full text-xs font-medium bg-white/10 border border-white/10 text-white/90 flex items-center gap-1.5">
+                <span>{c.emoji}</span> {c.label}
+              </motion.button>
+            ))}
+            {!pillsExpanded && HOME_CATEGORY_PILLS.length > 4 && (
+              <button onClick={() => setPillsExpanded(true)} className="shrink-0 h-9 w-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                <MoreHorizontal className="h-4 w-4 text-white/80" />
+              </button>
+            )}
         </div>
 
-        <div className="mt-4">
-          <SocialProofStrip />
-        </div>
-        <LiveTripsSection user={user} />
+        <Reveal>
+          <div className="rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xl p-4">
+            <h3 className="text-sm font-semibold mb-3">How it Works</h3>
+            <div className="grid grid-cols-4 gap-2">
+              {HOW_IT_WORKS.map((s) => (
+                <div key={s.label} className="text-center">
+                  <div className="h-11 w-11 mx-auto rounded-full bg-white/10 border border-white/10 flex items-center justify-center">
+                    <s.icon className={`h-4 w-4 ${s.iconClass || ''}`} />
+                  </div>
+                  <p className="text-xs font-medium mt-2">{s.label}</p>
+                  <p className="text-[10px] text-white/50 mt-0.5 leading-snug">{s.caption}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Reveal>
+
+        {nearby.length > 0 && (
+          <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold">Nearby Discoveries</h3>
+                <button onClick={() => onNav('explore', null, 'nearby')} className="text-xs text-white/50">See all</button>
+              </div>
+              <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                {nearby.slice(0, 6).map((r, i) => (
+                  <motion.div key={r.id} className="w-64 shrink-0"
+                    initial={false}
+                    animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 10 }}
+                    transition={{ delay: 0.24 + i * 0.07, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <RouteCard route={r} onOpen={() => onNav('detail', r.id)} />
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+        )}
 
         {trending.length > 0 && (
-          <div className="mt-8">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4" />
-                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">Trending routes</h3>
+          <Reveal>
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span>🔥</span>
+                  <h3 className="text-sm font-semibold">Trending This Week</h3>
+                </div>
+                <button onClick={() => onNav('explore')} className="text-xs text-white/50">See all</button>
               </div>
-              <button onClick={() => onNav('explore')} className="text-xs text-neutral-500 dark:text-neutral-400">See all</button>
+              <div className="space-y-3">
+                {trending.slice(0, 3).map((r) => (
+                  <RouteCard key={r.id} route={r} onOpen={() => onNav('detail', r.id)} />
+                ))}
+              </div>
             </div>
-            <div className="space-y-3">
-              {trending.slice(0, 3).map((r) => (
-                <RouteCard key={r.id} route={r} onOpen={() => onNav('detail', r.id)} />
-              ))}
-            </div>
-          </div>
+          </Reveal>
         )}
 
-        <div className="mt-8">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">Your recent routes</h3>
-            {myRoutes.length > 0 && (
-              <button onClick={() => onNav('my')} className="text-xs text-neutral-500 dark:text-neutral-400">See all</button>
+        {/* Reveal order 7: community section, last of the fast cascade */}
+        <motion.div ref={activityRef}
+          initial={false}
+          animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 10 }}
+          transition={{ delay: 0.32, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">Community Activity</h3>
+              {activity.length > 2 && !showAllActivity && (
+                <button onClick={() => setShowAllActivity(true)} className="text-xs text-white/50 flex items-center gap-0.5">
+                  Show More <ChevronRight className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {activity.length > 0 ? (
+              <div className="space-y-2">
+                {(showAllActivity ? activity : activity.slice(0, 2)).map((a, i) => (
+                  <motion.div key={i}
+                    initial={false}
+                    animate={{ opacity: ready ? 1 : 0, y: ready ? 0 : 10 }}
+                    transition={{ delay: 0.36 + i * 0.06, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                    className="rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xl px-3 py-2.5 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-full overflow-hidden shrink-0">
+                      <Avatar avatarId={a.avatar_id} size={36} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm leading-snug">{a.text}</p>
+                      <p className="text-[11px] text-white/40 mt-0.5">{timeAgo(a.created_at)}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-white/5 border border-dashed border-white/10 px-4 py-5 text-center">
+                <p className="text-xs text-white/50">No activity yet. Be the first to record, verify, or share a route.</p>
+              </div>
+            )}
+        </motion.div>
+
+        <LiveTripsSection user={user} />
+
+        <Reveal>
+          <SocialProofStrip variant="glass" />
+        </Reveal>
+
+        <Reveal>
+          <div className="grid grid-cols-2 gap-3">
+            <motion.button whileTap={{ scale: 0.97 }} onClick={() => onNav('my')}
+              className="rounded-3xl bg-white/10 border border-white/10 backdrop-blur-xl p-5 text-left">
+              <Bookmark className="h-5 w-5 mb-3" />
+              <p className="text-sm font-medium">My Library</p>
+              <p className="text-xs text-white/50 mt-0.5">{myRoutes.length} saved</p>
+            </motion.button>
+            <Link href="/community" className="rounded-3xl bg-white/10 border border-white/10 backdrop-blur-xl p-5 text-left block">
+              <Users className="h-5 w-5 mb-3" />
+              <p className="text-sm font-medium">Community</p>
+              <p className="text-xs text-white/50 mt-0.5">Open feed</p>
+            </Link>
+          </div>
+        </Reveal>
+
+        <Reveal>
+          <motion.button whileTap={{ scale: 0.98 }} onClick={() => onNav('plan')}
+            className="w-full rounded-3xl bg-white/10 border border-white/10 backdrop-blur-xl p-4 flex items-center justify-between text-left">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-white/50">Plan a Trip</p>
+              <p className="text-sm font-semibold mt-1">Get route recommendations for a destination</p>
+            </div>
+            <Search className="h-5 w-5 text-white/50" />
+          </motion.button>
+        </Reveal>
+
+        <Reveal>
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold">Your recent routes</h3>
+              {myRoutes.length > 0 && (
+                <button onClick={() => onNav('my')} className="text-xs text-white/50">See all</button>
+              )}
+            </div>
+            {myRoutes.length === 0 ? (
+              <div className="rounded-3xl bg-white/5 border border-dashed border-white/10 p-8 text-center">
+                <MapPin className="h-8 w-8 mx-auto text-white/30" />
+                <p className="mt-3 text-sm font-medium text-white/80">No routes yet</p>
+                <p className="text-xs text-white/50 mt-1">Record your first journey to share the local way.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myRoutes.slice(0, 3).map((r) => (
+                  <RouteCard key={r.id} route={r} onOpen={() => onNav('detail', r.id)} />
+                ))}
+              </div>
             )}
           </div>
-          {myRoutes.length === 0 ? (
-            <div className="rounded-3xl bg-neutral-50 dark:bg-neutral-900 border border-dashed border-neutral-200 dark:border-neutral-700 p-8 text-center">
-              <MapPin className="h-8 w-8 mx-auto text-neutral-300 dark:text-neutral-600" />
-              <p className="mt-3 text-sm font-medium text-neutral-700 dark:text-neutral-300">No routes yet</p>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Record your first journey to share the local way.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {myRoutes.slice(0, 3).map((r) => (
-                <RouteCard key={r.id} route={r} onOpen={() => onNav('detail', r.id)} />
-              ))}
-            </div>
-          )}
-        </div>
+        </Reveal>
       </div>
+      </motion.div>
     </div>
   );
 }
@@ -1901,10 +2378,10 @@ function PlanTrip({ onBack, onOpen }) {
   );
 }
 
-function Explore({ onBack, onOpen }) {
+function Explore({ onBack, onOpen, initialCat }) {
   const [routes, setRoutes] = useState(null);
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState('trending');
+  const [cat, setCat] = useState(initialCat || 'trending');
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ city: '', route_type: '', distance: '' });
   const [cities, setCities] = useState([]);
@@ -2961,22 +3438,30 @@ function App() {
   const [screen, setScreen] = useState('splash');
   const [detailId, setDetailId] = useState(null);
   const [groupId, setGroupId] = useState(null);
+  const [exploreInitialCat, setExploreInitialCat] = useState(null);
   const [recordedData, setRecordedData] = useState(null);
   const [shareRoute, setShareRoute] = useState(null);
   const [shareMode, setShareMode] = useState(null); // 'open' | 'mini' | null
+  // Flips true the first time Home finishes its own loading-gate (map/fonts/
+  // location settled). Bottom nav waits on this only for that very first
+  // appearance after Splash — later, ordinary in-app visits to Home skip the
+  // gate entirely (passed to Home as `skipIntroGate`), so this never
+  // flickers on routine navigation, only on a fresh page load.
+  const [homeEverReady, setHomeEverReady] = useState(false);
   const { user, googleUser, signInWithGoogle, signOut, updateName } = useAuth();
   useServiceWorker();
 
   const openShare = (r) => { setShareRoute(r); setShareMode('open'); };
   const setMode = (m) => { setShareMode(m); if (m === null) setShareRoute(null); };
 
-  const goto = (s, id = null) => {
+  const goto = (s, id = null, extra = null) => {
     if (s === 'detail' && id) setDetailId(id);
     if (s === 'group-detail' && id) setGroupId(id);
+    if (s === 'explore') setExploreInitialCat(extra);
     setScreen(s);
   };
 
-  const showBottomNav = ['home', 'explore', 'my', 'profile'].includes(screen);
+  const showBottomNav = ['home', 'explore', 'my', 'profile'].includes(screen) && (screen !== 'home' || homeEverReady);
 
   return (
     <div className="max-w-md mx-auto bg-white dark:bg-neutral-950 min-h-screen relative overflow-x-hidden">
@@ -2984,7 +3469,9 @@ function App() {
         {screen === 'splash' && <Splash key="splash" onDone={() => setScreen('home')} />}
       </AnimatePresence>
 
-      {screen === 'home' && <Home onNav={goto} user={user} />}
+      {screen === 'home' && (
+        <Home onNav={goto} user={user} skipIntroGate={homeEverReady} onReady={() => setHomeEverReady(true)} />
+      )}
       {screen === 'record' && (
         <Record user={user} onBack={() => setScreen('home')}
           onDone={(data) => { setRecordedData(data); setScreen('save'); }} />
@@ -2994,7 +3481,9 @@ function App() {
           onSaved={(r) => { setRecordedData(null); setDetailId(r.id); openShare(r); setScreen('detail'); }} />
       )}
       {screen === 'my' && <Library user={user} onOpen={(id) => goto('detail', id)} />}
-      {screen === 'explore' && <Explore onOpen={(id) => goto('detail', id)} />}
+      {screen === 'explore' && (
+        <Explore key={exploreInitialCat || 'default'} initialCat={exploreInitialCat} onOpen={(id) => goto('detail', id)} />
+      )}
       {screen === 'plan' && <PlanTrip onBack={() => setScreen('home')} onOpen={(id) => goto('detail', id)} />}
       {screen === 'profile' && (
         <Profile user={user} googleUser={googleUser} updateName={updateName}
@@ -3013,7 +3502,9 @@ function App() {
           onOpenRoute={(id) => setDetailId(id)} />
       )}
 
-      {showBottomNav && <BottomNav active={screen} onNav={goto} />}
+      <AnimatePresence>
+        {showBottomNav && <BottomNav key="bottom-nav" active={screen} onNav={goto} />}
+      </AnimatePresence>
 
       <AnimatePresence>
         {shareRoute && shareMode && (

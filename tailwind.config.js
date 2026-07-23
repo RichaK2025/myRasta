@@ -18,6 +18,11 @@ module.exports = {
       },
       extend: {
         colors: {
+          // Sparse accents for the Home discovery surface — everything else
+          // in the app stays on neutral-*/shadcn tokens.
+          forest: '#365C4D',
+          earth: '#8A6D4D',
+          sunset: '#D88A4B',
           border: 'hsl(var(--border))',
           input: 'hsl(var(--input))',
           ring: 'hsl(var(--ring))',
